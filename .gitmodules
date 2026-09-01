@@ -1,0 +1,6 @@
+[submodule "zNetV2"]
+	path = zNetV2
+	url = https://github.com/PassByYou888/zNetV2.git
+[submodule "LingoFuse"]
+	path = LingoFuse
+	url = https://github.com/PassByYou888/LingoFuse.git
