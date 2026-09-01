@@ -1,25 +1,10 @@
 # ============================================================
-# zAPI Python 演示项目 - 可选依赖清单
+# LingoFuse MCP Server 核心依赖
 # ============================================================
-# 基础示例（examples/ 下所有 *.py）仅需 Python 3.8+ 标准库，
-# 无需安装任何第三方包。
-#
-# 以下依赖仅用于高级功能：
-#   - bridge/zapi_bridge.py      (HTTP 网关 + Webhook)
-#   - bridge/cross_bridge.py     (轻量 HTTP 中转)
-#   - bridge/python_webhook.py   (Webhook 服务器，仅需标准库)
-#   - 跨语言测试（PHP/Node.js）  不依赖 Python 包
-# ============================================================
+# 运行 mcp_server.py 必需
+fastmcp>=0.1.0          # MCP 服务器框架
+pydantic>=2.0.0,<3.0.0  # fastmcp 依赖
 
-# ---------- 必需（运行 Bridge） ----------
-flask>=2.0.0            # HTTP 服务框架
-requests>=2.25.0        # HTTP 客户端（转发 Webhook）
-fastmcp>=2.0.0
-pydantic>=2.0.0,<3.0.0
-
-# ---------- 可选（性能优化） ----------
-# waitress>=2.0.0       # 生产级 WSGI 服务器（替代 Flask 内置）
-# orjson>=3.8.0         # 高性能 JSON 序列化（替代标准 json）
-
-# ---------- 测试/开发（非必需） ----------
-# pytest>=7.0.0         # 单元测试（暂无测试用例）
+# ---------- 以下为可选（仅当使用 bridge.py 时需要） ----------
+# flask>=2.0.0           # HTTP 网关（bridge.py）
+# requests>=2.25.0       # HTTP 客户端（bridge.py 测试用）
