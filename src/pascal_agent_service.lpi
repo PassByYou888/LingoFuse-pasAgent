@@ -30,11 +30,11 @@
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="..\LingoFuse\pascal\lingofuse_helper.pas"/>
+        <Filename Value="lingofuse_helper.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
       <Unit>
-        <Filename Value="..\LingoFuse\pascal\lingofuse_import.pas"/>
+        <Filename Value="lingofuse_import.pas"/>
         <IsPartOfProject Value="True"/>
       </Unit>
     </Units>
@@ -47,7 +47,7 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir)"/>
-      <OtherUnitFiles Value="..\zNetV2\source;..\LingoFuse\pascal"/>
+      <OtherUnitFiles Value="..\zNetV2\source"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Linking>
