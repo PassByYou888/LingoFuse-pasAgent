@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "pascal-backend": {
+      "command": "python",
+      "args": ["D:/mcp_tool/mcp_server.py"],
+      "env": {
+        "LINGOFUSE_ENDPOINT": "ipc:cross",
+        "MCP_LOG_ENABLED": "true",
+        "MCP_LOG_FILE": "D:/mcp_tool/mcp_server.log"
+      }
+    }
+  }
+}
