@@ -1,0 +1,1 @@
+pyinstaller --onefile --collect-all fastmcp --collect-all pydantic --collect-all tzdata --hidden-import language_middleware --hidden-import lingofuse --paths . --add-data "lingofuse;lingofuse" mcp_server.py
