@@ -1,0 +1,44 @@
+object MainForm: TMainForm
+  Left = 0
+  Height = 500
+  Top = 0
+  Width = 700
+  Caption = '健康打卡系统'
+  ClientHeight = 500
+  ClientWidth = 700
+  Color = clBtnFace
+  Font.CharSet = ANSI_CHARSET
+  Font.Color = clBlack
+  Font.Height = -15
+  Font.Name = 'Consolas'
+  Font.Pitch = fpFixed
+  Font.Quality = fqDraft
+  Position = poDefaultPosOnly
+  LCLVersion = '4.8.0.0'
+  OnClose = FormClose
+  OnCreate = FormCreate
+  object btnNew: TButton
+    Left = 16
+    Height = 33
+    Top = 16
+    Width = 160
+    Caption = '新建健康记录'
+    TabOrder = 0
+    OnClick = btnNewClick
+  end
+  object mmoLog: TMemo
+    Left = 16
+    Height = 420
+    Top = 64
+    Width = 668
+    Anchors = [akTop, akLeft, akRight, akBottom]
+    ScrollBars = ssVertical
+    TabOrder = 1
+  end
+  object sysTimer: TTimer
+    Interval = 1
+    OnTimer = sysTimerTimer
+    Left = 56
+    Top = 80
+  end
+end

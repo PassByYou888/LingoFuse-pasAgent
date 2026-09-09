@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-language_middleware.py - v7.1 (LingoFuse Native Multi‑Language Middleware)
+language_middleware.py - v7.2 (LingoFuse Native Multi-Language Middleware)
 
 DESCRIPTION
     This module provides a language-agnostic middleware for LingoFuse,
@@ -15,15 +15,15 @@ DESCRIPTION
         - Optional dynamic tool registration via `register_agent` API.
 
     The middleware uses direct ctypes calls to the LingoFuse dynamic library
-    and is fully thread‑safe. It implements a singleton pattern to share the
+    and is fully thread-safe. It implements a singleton pattern to share the
     same connection across multiple components.
 
 CONFIGURATION (defaults can be overridden by environment variables or
               passed to get_instance())
-    LINGOFUSE_ENDPOINT              - LingoFuse endpoint (default: ipc:cross)
+    LINGOFUSE_ENDPOINT              - LingoFuse endpoint (default: ipc:agent)
     LINGOFUSE_TIMEOUT_MS            - Call timeout in ms (default: 5000)
     LINGOFUSE_REG_AGENT_APP         - Local app name used by this client (default: reg_agent)
-    LINGOFUSE_TOOL_PROVIDER_APP     - Backend app that provides tools (default: my_tool_provider)
+    LINGOFUSE_TOOL_PROVIDER_APP     - Backend app that provides tools (default: agent_main_app)
     LINGOFUSE_AGENT_MAIN_API        - API to fetch tool list (default: agent_main)
     LINGOFUSE_AGENT_LOG_API         - API to send logs (default: agent_log)
     LINGOFUSE_REGISTER_AGENT_API    - API for dynamic registration (default: register_agent)
@@ -57,6 +57,12 @@ NOTES
       LanguageCallError if the tool is not found or the call fails).
     - The middleware registers a local app (reg_agent) only if the
       register_agent API is used; otherwise it acts purely as a client.
+    - **Important**: Dynamic tool registration via `register_agent` does NOT
+      modify the local tool cache (`self._tools`) immediately. The tool list
+      is entirely sourced from the backend's `agent_main` response. This
+      ensures consistency and avoids stale entries. Registered tools will
+      appear after the next `_fetch_tools_from_backend()` call (triggered by
+      the MCP server's refresh monitor).
 
 DEPENDENCIES
     - lingofuse package (must be installed or in PYTHONPATH)
@@ -79,10 +85,10 @@ from typing import Any, Dict, List, Optional
 # ============================================================================
 # Configuration (using LINGOFUSE_ prefix)
 # ============================================================================
-DEFAULT_ENDPOINT = os.environ.get("LINGOFUSE_ENDPOINT", "ipc:cross")
+DEFAULT_ENDPOINT = os.environ.get("LINGOFUSE_ENDPOINT", "ipc:agent")
 DEFAULT_TIMEOUT_MS = int(os.environ.get("LINGOFUSE_TIMEOUT_MS", "5000"))
 DEFAULT_REG_AGENT_APP_NAME = os.environ.get("LINGOFUSE_REG_AGENT_APP", "reg_agent")
-DEFAULT_TOOL_PROVIDER_APP = os.environ.get("LINGOFUSE_TOOL_PROVIDER_APP", "my_tool_provider")
+DEFAULT_TOOL_PROVIDER_APP = os.environ.get("LINGOFUSE_TOOL_PROVIDER_APP", "agent_main_app")
 DEFAULT_AGENT_MAIN_API = os.environ.get("LINGOFUSE_AGENT_MAIN_API", "agent_main")
 DEFAULT_AGENT_LOG_API = os.environ.get("LINGOFUSE_AGENT_LOG_API", "agent_log")
 DEFAULT_REGISTER_AGENT_API = os.environ.get("LINGOFUSE_REGISTER_AGENT_API", "register_agent")
@@ -208,7 +214,7 @@ _mw_instance = None
 def _reg_tool_callback(trigger: DataHnd, inp: DataHnd, out: DataHnd):
     """
     Callback for the `register_agent` API.
-    Accepts a JSON tool definition and adds it to the in‑memory tool list.
+    Accepts a JSON tool definition and forwards it to the middleware.
     """
     global _mw_instance
     if _mw_instance is None:
@@ -231,13 +237,14 @@ def _reg_tool_callback(trigger: DataHnd, inp: DataHnd, out: DataHnd):
         if not target_api:
             raise ValueError("Missing target_api")
 
+        # Register the tool (this does NOT modify the local cache; it only logs)
         _mw_instance._register_tool(tool_name, description, target_app, target_api)
 
-        resp = json.dumps({"status": "ok", "message": f"Tool '{tool_name}' registered successfully"})
+        resp = json.dumps({"status": "ok", "message": f"Tool '{tool_name}' registered successfully"}, ensure_ascii=False)
         _write_string(out, resp.encode('utf-8'))
         sys.stderr.write(f"[reg_tool] Registered tool: {tool_name} -> {target_app}.{target_api}\n")
     except Exception as e:
-        err_msg = json.dumps({"status": "error", "message": str(e)})
+        err_msg = json.dumps({"status": "error", "message": str(e)}, ensure_ascii=False)
         _write_string(out, err_msg.encode('utf-8'))
         sys.stderr.write(f"[reg_tool] Error: {e}\n")
         sys.stderr.flush()
@@ -441,6 +448,8 @@ class LanguageMiddleware:
                 sys.stderr.write(f"\n[LanguageMiddleware] Received tool info JSON:\n{formatted_json}\n\n")
 
             tools = data.get('tools', [])
+            # Replace the entire tool dictionary with the fresh list
+            self._tools.clear()
             for t in tools:
                 name = t.get('name')
                 if not name:
@@ -463,15 +472,12 @@ class LanguageMiddleware:
             sys.stderr.flush()
 
     def _register_tool(self, tool_name: str, description: str, target_app: str, target_api: str):
-        """Add a tool to the in‑memory registry (called by reg_tool callback)."""
-        self._tools[tool_name] = {
-            'name': tool_name,
-            'description': description,
-            'target_app': target_app,
-            'target_api': target_api,
-            'parameters': {}
-        }
-        sys.stderr.write(f"[LanguageMiddleware] Tool registered (in-memory): {tool_name} -> {target_app}.{target_api}\n")
+        """
+        Record a tool registration event. This method does NOT modify the
+        local tool cache. It only logs the event. The cache is exclusively
+        updated by _fetch_tools_from_backend().
+        """
+        sys.stderr.write(f"[LanguageMiddleware] Tool registered (not cached): {tool_name} -> {target_app}.{target_api}\n")
         sys.stderr.flush()
 
     def _cleanup(self):
@@ -517,7 +523,7 @@ class LanguageMiddleware:
             return None
         try:
             req = LF_CreateData(self._agent_log_api.encode('utf-8'))
-            payload = json.dumps({"message": message}).encode('utf-8')
+            payload = json.dumps({"message": message}, ensure_ascii=False).encode('utf-8')
             _write_string(req, payload)
 
             resp = LF_Call(self._tool_provider_app.encode('utf-8'), req, self._timeout_ms)
@@ -671,7 +677,7 @@ def get_default_middleware() -> LanguageMiddleware:
 
 
 if __name__ == "__main__":
-    print("=== LanguageMiddleware Self‑test (v7.1, lazy connect) ===")
+    print("=== LanguageMiddleware Self-test (v7.2, lazy connect) ===")
     try:
         mw = LanguageMiddleware.get_instance()
         # Attempt to connect

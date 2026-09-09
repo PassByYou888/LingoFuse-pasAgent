@@ -1,5 +1,7 @@
-del *.exe
-del *.ini
-del *.local
-del *.identcache
-del *.lps
+del/s *.exe
+del/s *.ini
+del/s *.local
+del/s *.identcache
+del/s *.lps
+del/s *.spec
+

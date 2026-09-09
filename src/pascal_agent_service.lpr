@@ -15,14 +15,14 @@ program pascal_agent_service;
       - register_agent: Allows dynamic registration of new tools at runtime
                        (used by language_middleware's reg_agent, if present).
 
-    The service listens on both IPC (ipc:cross) and TCP (0.0.0.0:9897) to
+    The service listens on both IPC (ipc:agent) and TCP (0.0.0.0:9897) to
     support both local and remote clients. It automatically registers itself
     with the LingoFuse C4 service mesh.
 
   CONFIGURATION (constants below)
-    APP_NAME            = 'my_tool_provider'   (must match tool_provider_app in Python)
+    APP_NAME            = 'agent_main_app'   (must match tool_provider_app in Python)
     APP_DESC            = 'My tool provider'
-    IPC_ENDPOINT        = 'ipc:cross'          (must match LINGOFUSE_ENDPOINT default)
+    IPC_ENDPOINT        = 'ipc:agent'          (must match LINGOFUSE_ENDPOINT default)
     TCP_LISTEN_ADDR     = '0.0.0.0:9897'
     TCP_PUBLIC_ADDR     = '127.0.0.1:9897'
 
@@ -47,16 +47,23 @@ program pascal_agent_service;
 {$APPTYPE CONSOLE}
 
 uses
-  SysUtils, Classes,
-  Z.Core, Z.PascalStrings, Z.Json, Z.Status, Z.UnicodeMixedLib,
-  lingofuse_import, lingofuse_helper;
+  SysUtils,
+  Classes,
+  Z.Core,
+  Z.PascalStrings,
+  Z.UPascalStrings,
+  Z.Json,
+  Z.Status,
+  Z.UnicodeMixedLib,
+  lingofuse_import,
+  lingofuse_helper;
 
 const
-  APP_NAME            = 'my_tool_provider';
-  APP_DESC            = 'My tool provider';
-  IPC_ENDPOINT        = 'ipc:cross';
-  TCP_LISTEN_ADDR     = '0.0.0.0:9897';
-  TCP_PUBLIC_ADDR     = '127.0.0.1:9897';
+  APP_NAME = 'agent_main_app';
+  APP_DESC = 'agent main application';
+  IPC_ENDPOINT = 'ipc:agent';
+  TCP_LISTEN_ADDR = '0.0.0.0:9897';
+  TCP_PUBLIC_ADDR = '127.0.0.1:9897';
 
 type
   { TRegisteredAgent – stores dynamically registered tool definitions (JSON objects) }
@@ -74,9 +81,9 @@ end;
 var
   RegisteredAgent: TRegisteredAgent;
 
-// ============================================================================
-// 1. API Callbacks
-// ============================================================================
+  // ============================================================================
+  // 1. API Callbacks
+  // ============================================================================
 
 (*
   do_agent_log – Callback for agent_log API
@@ -86,21 +93,23 @@ var
 *)
 procedure do_agent_log(Trigger: Pointer; Input, Output: TDataHnd___); cdecl;
 var
-  jsonStr: TZ_JsonString;
+  jsonStr: TBytes;
   jo: TZ_JsonObject;
   msg: string;
+  ori_msg: TZ_JsonString;
 begin
   jo := TZ_JsonObject.Create;
   try
     // Read the input string (UTF‑8, null‑terminated)
-    jsonStr.ReadUTF8AnsiChar(LF_GetBuffer(TDataHnd(Input)), LF_GetSize(TDataHnd(Input)));
-    jo.ParseText(jsonStr);
+    jsonStr := LF_ReadStringBytes(TDataHnd(Input));
+    jo.Parae(jsonStr);
+    ori_msg.UTF8 := jsonStr;
 
     // Extract the message
     if jo.Exists('message') then
       msg := jo.S['message']
     else
-      msg := jsonStr.Text;
+      msg := ori_msg.Text;
 
     // Print the log message (this will also appear in the console)
     if msg <> '' then
@@ -109,7 +118,7 @@ begin
     // Respond with success
     jo.Clear;
     jo.S['status'] := 'ok';
-    LF_WriteString(TDataHnd(Output), jo.ToJSONString(False).Text);
+    LF_WriteStringBytes(TDataHnd(Output), jo.ToBytes);
   except
     on E: Exception do
     begin
@@ -164,33 +173,36 @@ begin
     end;
 
     // ----- Dynamically registered tools (from RegisteredAgent) -----
-    if RegisteredAgent.Num > 0 then
-      with RegisteredAgent.Repeat_ do
-        repeat
-          // Validate required fields
-          if queue^.Data.Exists('name') and queue^.Data.Exists('description') and
-             queue^.Data.Exists('target_app') and queue^.Data.Exists('target_api') and
-             queue^.Data.Exists('parameters') then
-          begin
-            // Check if the target API is actually available (local or remote)
-            if LF_CheckApiEx(queue^.Data.S['target_app'], queue^.Data.S['target_api']) then
+    RegisteredAgent.Lock;
+    try
+      if RegisteredAgent.Num > 0 then
+        with RegisteredAgent.Repeat_ do
+          repeat
+            // Validate required fields
+            if queue^.Data.Exists('name') and queue^.Data.Exists('description') and queue^.Data.Exists('target_app') and queue^.Data.Exists('target_api') and queue^.Data.Exists('parameters') then
             begin
-              toolObj := JsonArr.AddObject;
-              toolObj.Assign(queue^.Data);
-              DoStatus('[agent_main] Included dynamic tool: %s (API %s.%s available)',
-                [queue^.Data.S['name'], queue^.Data.S['target_app'], queue^.Data.S['target_api']]);
+              // Check if the target API is actually available (local or remote)
+              if LF_CheckApiEx(queue^.Data.S['target_app'], queue^.Data.S['target_api']) then
+              begin
+                toolObj := JsonArr.AddObject;
+                toolObj.Assign(queue^.Data);
+                DoStatus('[agent_main] Included dynamic tool: %s (API %s.%s available)',
+                  [queue^.Data.S['name'], queue^.Data.S['target_app'], queue^.Data.S['target_api']]);
+              end
+              else
+                DoStatus('[agent_main] Skipped dynamic tool "%s": API %s.%s not available',
+                  [queue^.Data.S['name'], queue^.Data.S['target_app'], queue^.Data.S['target_api']]);
             end
             else
-              DoStatus('[agent_main] Skipped dynamic tool "%s": API %s.%s not available',
-                [queue^.Data.S['name'], queue^.Data.S['target_app'], queue^.Data.S['target_api']]);
-          end
-          else
-            DoStatus('[agent_main] Skipped invalid tool registration (missing fields) for: %s',
-              [queue^.Data.ToJSONString(False).Text]);
-        until not Next;
+              DoStatus('[agent_main] Skipped invalid tool registration (missing fields) for: %s',
+                [queue^.Data.ToJSONString(False).Text]);
+          until not Next;
+    finally
+      RegisteredAgent.UnLock;
+    end;
 
     // Send the complete tool list as a JSON string
-    LF_WriteString(TDataHnd(Output), JsonObj.ToJSONString(False).Text);
+    LF_WriteStringBytes(TDataHnd(Output), JsonObj.ToBytes);
     DoStatus('[agent_main] Tool list sent (%d tools)', [JsonArr.Count]);
   finally
     JsonObj.Free;
@@ -207,7 +219,7 @@ end;
 *)
 procedure do_register_agent(Trigger: Pointer; Input, Output: TDataHnd___); cdecl;
 var
-  jsonStr: TZ_JsonString;
+  jsonStr: TBytes;
   jo: TZ_JsonObject;
   toolObj: TZ_JsonObject;
   Name: string;
@@ -216,8 +228,8 @@ begin
   jo := TZ_JsonObject.Create;
   try
     // ---- Read and parse input ----
-    jsonStr.ReadUTF8AnsiChar(LF_GetBuffer(TDataHnd(Input)), LF_GetSize(TDataHnd(Input)));
-    jo.ParseText(jsonStr);
+    jsonStr := LF_ReadStringBytes(TDataHnd(Input));
+    jo.Parae(jsonStr);
 
     // ---- Validate required fields (if missing, log error and exit without adding) ----
     if not jo.Exists('name') then
@@ -270,34 +282,40 @@ begin
 
     // ---- Search for existing tool with the same name ----
     found := False;
-    if RegisteredAgent.Num > 0 then
-      with RegisteredAgent.Repeat_ do
-        repeat
-          if umlMultipleMatch(Name, queue^.Data.S['name']) then
-          begin
-            // Overwrite existing definition
-            queue^.Data.Assign(jo);
-            found := True;
-            Break;
-          end;
-        until not Next;
+    RegisteredAgent.Lock;
+    try
+      if RegisteredAgent.Num > 0 then
+        with RegisteredAgent.Repeat_ do
+          repeat
+            if umlMultipleMatch(Name, queue^.Data.S['name']) then
+            begin
+              // Overwrite existing definition
+              queue^.Data.Assign(jo);
+              found := True;
+              Break;
+            end;
+          until not Next;
+
+      if not found then
+      begin
+        toolObj := TZ_JsonObject.Create;
+        toolObj.Assign(jo);
+        RegisteredAgent.Add(toolObj);
+      end
+    finally
+      RegisteredAgent.UnLock;
+    end;
 
     // ---- Add new tool if not found ----
     if not found then
-    begin
-      toolObj := TZ_JsonObject.Create;
-      toolObj.Assign(jo);
-      RegisteredAgent.Add(toolObj);
-      DoStatus('[register_agent] Added new tool: %s', [Name]);
-    end
+      DoStatus('[register_agent] Added new tool: %s "%s"', [Name, jo.S['description']])
     else
-      DoStatus('[register_agent] Updated existing tool: %s', [Name]);
+      DoStatus('[register_agent] Updated existing tool: %s "%s"', [Name, jo.S['description']]);
 
     // ---- Return success ----
     jo.Clear;
     jo.S['status'] := 'ok';
-    LF_WriteString(TDataHnd(Output), jo.ToJSONString(False).Text);
-
+    LF_WriteStringBytes(TDataHnd(Output), jo.ToBytes);
   except
     on E: Exception do
     begin

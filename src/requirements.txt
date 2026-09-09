@@ -6,5 +6,5 @@ fastmcp>=0.1.0          # MCP 服务器框架
 pydantic>=2.0.0,<3.0.0  # fastmcp 依赖
 
 # ---------- 以下为可选（仅当使用 bridge.py 时需要） ----------
-# flask>=2.0.0           # HTTP 网关（bridge.py）
-# requests>=2.25.0       # HTTP 客户端（bridge.py 测试用）
+flask>=2.0.0           # HTTP 网关（bridge.py）
+requests>=2.25.0       # HTTP 客户端（bridge.py 测试用）

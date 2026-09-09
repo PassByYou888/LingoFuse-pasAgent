@@ -1,0 +1,275 @@
+object NewRecordForm: TNewRecordForm
+  Left = 0
+  Height = 619
+  Top = 0
+  Width = 682
+  BorderStyle = bsDialog
+  Caption = '新建健康记录'
+  ClientHeight = 619
+  ClientWidth = 682
+  Color = clBtnFace
+  Font.CharSet = ANSI_CHARSET
+  Font.Color = clBlack
+  Font.Height = -12
+  Font.Name = 'Tahoma'
+  Font.Pitch = fpVariable
+  Font.Quality = fqDraft
+  Position = poDefaultPosOnly
+  LCLVersion = '4.8.0.0'
+  OnClose = FormClose
+  object lblName: TLabel
+    Left = 24
+    Height = 14
+    Top = 24
+    Width = 48
+    Caption = '姓　名：'
+  end
+  object lblAge: TLabel
+    Left = 24
+    Height = 14
+    Top = 60
+    Width = 48
+    Caption = '年　龄：'
+  end
+  object lblGender: TLabel
+    Left = 24
+    Height = 14
+    Top = 96
+    Width = 48
+    Caption = '性　别：'
+  end
+  object lblBirth: TLabel
+    Left = 24
+    Height = 14
+    Top = 132
+    Width = 60
+    Caption = '出生日期：'
+  end
+  object lblID: TLabel
+    Left = 24
+    Height = 14
+    Top = 168
+    Width = 60
+    Caption = '身份证号：'
+  end
+  object lblPhone: TLabel
+    Left = 24
+    Height = 14
+    Top = 204
+    Width = 48
+    Caption = '电　话：'
+  end
+  object lblAddress: TLabel
+    Left = 24
+    Height = 14
+    Top = 240
+    Width = 48
+    Caption = '地　址：'
+  end
+  object lblTemp: TLabel
+    Left = 24
+    Height = 14
+    Top = 276
+    Width = 48
+    Caption = '体　温：'
+  end
+  object lblSBP: TLabel
+    Left = 24
+    Height = 14
+    Top = 312
+    Width = 48
+    Caption = '收缩压：'
+  end
+  object lblDBP: TLabel
+    Left = 200
+    Height = 14
+    Top = 312
+    Width = 48
+    Caption = '舒张压：'
+  end
+  object lblHeartRate: TLabel
+    Left = 24
+    Height = 14
+    Top = 348
+    Width = 48
+    Caption = '心　率：'
+  end
+  object lblSymptoms: TLabel
+    Left = 24
+    Height = 14
+    Top = 388
+    Width = 48
+    Caption = '症　状：'
+  end
+  object lblHistory: TLabel
+    Left = 24
+    Height = 14
+    Top = 460
+    Width = 60
+    Caption = '既往病史：'
+  end
+  object lblAllergy: TLabel
+    Left = 24
+    Height = 14
+    Top = 528
+    Width = 56
+    Caption = '过 敏 史：'
+  end
+  object lblContact: TLabel
+    Left = 400
+    Height = 14
+    Top = 24
+    Width = 72
+    Caption = '紧急联系人：'
+  end
+  object lblRemark: TLabel
+    Left = 400
+    Height = 14
+    Top = 60
+    Width = 48
+    Caption = '备　注：'
+  end
+  object edtName: TEdit
+    Left = 88
+    Height = 22
+    Top = 20
+    Width = 200
+    TabOrder = 0
+  end
+  object edtAge: TEdit
+    Left = 88
+    Height = 22
+    Top = 56
+    Width = 80
+    TabOrder = 1
+  end
+  object cbGender: TComboBox
+    Left = 88
+    Height = 22
+    Top = 92
+    Width = 120
+    ItemHeight = 14
+    Items.Strings = (
+      '男'
+      '女'
+    )
+    Style = csDropDownList
+    TabOrder = 2
+  end
+  object edtID: TEdit
+    Left = 88
+    Height = 22
+    Top = 164
+    Width = 200
+    TabOrder = 3
+  end
+  object edtPhone: TEdit
+    Left = 88
+    Height = 22
+    Top = 200
+    Width = 150
+    TabOrder = 4
+  end
+  object edtAddress: TEdit
+    Left = 88
+    Height = 22
+    Top = 236
+    Width = 300
+    TabOrder = 5
+  end
+  object edtTemp: TEdit
+    Left = 88
+    Height = 22
+    Top = 272
+    Width = 80
+    TabOrder = 6
+  end
+  object edtSBP: TEdit
+    Left = 88
+    Height = 22
+    Top = 308
+    Width = 80
+    TabOrder = 7
+  end
+  object edtDBP: TEdit
+    Left = 264
+    Height = 22
+    Top = 308
+    Width = 80
+    TabOrder = 8
+  end
+  object edtHeartRate: TEdit
+    Left = 88
+    Height = 22
+    Top = 344
+    Width = 80
+    TabOrder = 9
+  end
+  object memSymptoms: TMemo
+    Left = 88
+    Height = 60
+    Top = 384
+    Width = 300
+    TabOrder = 10
+  end
+  object memHistory: TMemo
+    Left = 88
+    Height = 60
+    Top = 456
+    Width = 300
+    TabOrder = 11
+  end
+  object edtAllergy: TEdit
+    Left = 88
+    Height = 22
+    Top = 524
+    Width = 200
+    TabOrder = 12
+  end
+  object edtContact: TEdit
+    Left = 480
+    Height = 22
+    Top = 20
+    Width = 160
+    TabOrder = 13
+  end
+  object memRemark: TMemo
+    Left = 480
+    Height = 100
+    Top = 56
+    Width = 160
+    TabOrder = 14
+  end
+  object btnOK: TButton
+    Left = 88
+    Height = 33
+    Top = 560
+    Width = 120
+    Caption = '确认生成 JSON'
+    TabOrder = 15
+    OnClick = btnOKClick
+  end
+  object btnCancel: TButton
+    Left = 220
+    Height = 33
+    Top = 560
+    Width = 80
+    Caption = '取消'
+    TabOrder = 16
+    OnClick = btnCancelClick
+  end
+  object dtpBirth: TEdit
+    Left = 88
+    Height = 22
+    Top = 128
+    Width = 150
+    TabOrder = 17
+  end
+  object DelayCloseTimer: TTimer
+    Tag = 5000
+    Enabled = False
+    OnTimer = DelayCloseTimerTimer
+    Left = 336
+    Top = 168
+  end
+end
