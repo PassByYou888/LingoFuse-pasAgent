@@ -1,6 +1,6 @@
-# LingoFuse-pasAgent
+# pasAgent
 
-**LingoFuse 的 Pascal Agent 工具链 —— 智能体时代的 Pascal 服务网格接入套件**
+**工业级 Pascal 智能体技术体系 —— 让 Pascal 语言无缝接入 AI 智能体生态**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
@@ -8,17 +8,16 @@
 
 ## 🎯 这是什么？
 
-**LingoFuse-pasAgent** 是 [LingoFuse](https://github.com/PassByYou888/LingoFuse) 的 **Pascal Agent 工具链分支**，提供了一套开箱即用的 **Pascal 智能体服务端** 和 **MCP（Model Context Protocol）网关** 实现。
+**pasAgent** 是一套 **工业级 Pascal 语言智能体（Agent）技术体系**，专为使用 Pascal 语言构建智能体服务而设计。它解决了传统 Pascal 应用接入 AI 智能体生态时面临的协议适配、工具注册、动态调度等核心问题，让 Pascal 开发者能够以最自然的方式将现有业务逻辑暴露给 AI 智能体（如豆包、LM Studio、Claude Desktop 等）。
 
-LingoFuse 是一个面向**智能体（Agent）**和**全栈系统**的**分布式 RPC 框架**，让 Python、Pascal、C++、Go、Rust、Java、C#、Node.js、PHP、浏览器 JavaScript 等十几种语言编写的服务能够互相调用，就像调用本地函数一样简单。**不需要写 IDL，不需要生成桩代码，不需要搭 HTTP 服务**——你只需要引用一个库，用你熟悉的语言写几行代码，你的函数就“全栈通杀”了。
+**核心能力**：
+- 🏗️ **Pascal 智能体服务框架** —— 轻松将 Pascal 函数、过程、类方法发布为 AI 可调用的工具（Tools）
+- 🌉 **MCP 协议原生网关** —— 自动将 Pascal 服务转换为 MCP（Model Context Protocol）标准接口
+- 🤖 **代码生成体系** —— 从 Pascal 声明一键生成 MCP 工具定义，零手工编写 JSON Schema
+- 🔌 **LLM 流式推理集成** —— 内置大语言模型服务，支持流式对话与工具调用
+- 🛠️ **完整的开发-部署工具链** —— 从代码编写、编译、测试到生产部署的全流程支持
 
-本仓库专注于 **Pascal 生态的智能体接入**，提供：
-
-- 🏗️ **Pascal Agent 服务端**（`pascal_agent_service`）：注册工具、接收日志、动态管理工具列表
-- 🔧 **Pascal Agent API 示例**（`pascal_agent_api`）：展示如何动态注册工具到后端
-- 🌉 **MCP Server 网关**（`mcp_server`）：将 LingoFuse 后端工具暴露为 MCP 协议，对接豆包、LM Studio、Claude Desktop 等 AI 客户端
-- 🔌 **HTTP Bridge**（`bridge`）：通用 HTTP 透传网关，任何能发 HTTP 请求的语言都能接入
-- 🤖 **LLM 流式服务**（`llm_service_*`）：本地大模型推理服务，支持 CPU/CUDA/Vulkan 多后端
+**定位**：面向 **企业级、工业级 Pascal 开发团队**，提供从“业务逻辑”到“智能体工具”的端到端技术方案，无需修改现有代码架构，即可融入 AI 驱动的下一代应用生态。
 
 ---
 
@@ -26,82 +25,58 @@ LingoFuse 是一个面向**智能体（Agent）**和**全栈系统**的**分布�
 
 | 特性 | 说明 |
 |------|------|
-| **10+ 语言绑定** | Python、Pascal、C++、Go、Rust、Java、C#、Node.js、PHP、Web.js |
-| **⚡ 高性能** | 同机 IPC 延迟 < 1ms，吞吐 10,000+ 请求/秒 |
-| **双通信模式** | TCP（跨机器）+ IPC（同机微秒级） |
-| **自动服务发现 & 负载均衡** | 基于 C4 网格，节点即插即用，请求自动分发 |
-| **零拷贝传输** | 直接访问内部缓冲区，无二次复制 |
-| **双调用模式** | 同步 Call（请求-响应）+ 异步 Notify（单向通知） |
-| **Sequenced Notify** | FIFO 有序交付，支持大数据分片流式传输 |
-| **自动内存回收** | 数据句柄闲置 5 分钟自动释放 |
-| **部署模式** | 节点无序启动，弹性伸缩零协调 |
-| **HTTP 桥接** | 自带 Flask 网关，Web 生态无缝接入 |
-| **MCP 协议支持** | 对接豆包、LM Studio、Claude Desktop 等 AI 客户端 |
-
-### 性能对比
-
-| 方案 | 延迟 (IPC) | 吞吐量 | 服务发现 | 负载均衡 | 顺序保证 |
-|------|------------|--------|----------|----------|----------|
-| **LingoFuse** | **< 1 ms** | **12k+/s** | ✅ 内置 | ✅ 内置 | ✅ FIFO |
-| gRPC | ~5-8 ms | ~3k/s | ❌ 需 etcd | ❌ 需 LB | ❌ |
-| REST | ~10-20 ms | ~1k/s | ❌ 需 Nginx | ❌ 需 Nginx | ❌ |
-
-**LingoFuse 比 gRPC 快 5-8 倍，比 REST 快 10-20 倍。**
+| **Pascal 原生 API** | 直接使用 Pascal 过程/函数/方法注册工具，无需 IDL 或桩代码 |
+| **MCP 协议兼容** | 完整支持 Model Context Protocol，与豆包、LM Studio、Claude 等无缝对接 |
+| **零侵入集成** | 无需修改现有业务代码，通过装饰器/辅助函数即可暴露工具 |
+| **代码生成器** | `pascal_decl_to_mcp` 工具自动解析 Pascal 声明，生成 MCP 工具 JSON 定义 |
+| **同步 + 异步调用** | 支持请求-响应（Call）和单向通知（Notify）两种通信模式 |
+| **顺序保证** | Sequenced Notify 确保消息按 FIFO 顺序交付，适用于流式场景 |
+| **自动服务发现** | 基于 C4 网格的服务注册与发现，节点动态加入/退出，无需配置 |
+| **负载均衡** | 内置智能路由，请求自动分发到最空闲的节点 |
+| **断线重连** | 客户端自动重连，保障高可用性 |
+| **高性能** | 同机 IPC 延迟 < 1ms，吞吐量 12,000+ 请求/秒 |
+| **跨平台** | 支持 Windows、Linux、macOS，编译为原生 EXE 或动态库 |
+| **生产就绪** | 配套日志、健康检查、配置生成等工具，满足企业级运维需求 |
 
 ---
 
-## 🏗️ 架构
+## 🏗️ 架构概览
 
 ```mermaid
 graph TB
-    subgraph Clients["客户端生态"]
-        Py["Python"]
-        Pas["Pascal"]
-        CPP["C++"]
-        Go["Go"]
-        Rust["Rust"]
-        Java["Java"]
-        Cs["C#"]
-        Node["Node.js"]
-        PHP["PHP"]
-        Web["浏览器 JS"]
+    subgraph Clients["AI 客户端生态"]
+        Doubao["豆包"]
+        LMStudio["LM Studio"]
+        Claude["Claude Desktop"]
+        Custom["自定义 MCP 客户端"]
     end
 
-    subgraph Bridge["HTTP 桥接"]
-        Flask["bridge.py<br>Flask 网关"]
+    subgraph Gateway["MCP 协议网关"]
+        MCP["mcp_server<br>MCP 网关"]
     end
 
-    subgraph MCP["MCP 网关"]
-        MCPServer["mcp_server.py<br>MCP Server"]
+    subgraph Pascal["Pascal 智能体服务层"]
+        Agent["pascal_agent_service<br>工具提供者"]
+        API["pascal_agent_api<br>动态注册示例"]
+        Health["HealthCheck<br>健康检查"]
     end
 
-    subgraph Core["⚡ LingoFuse 核心"]
-        C4["C4 分布式服务网格"]
-        LB["自动服务发现 & 负载均衡"]
-        Seq["序列化通知 FIFO"]
-        Reconn["自动断线重连"]
+    subgraph Tools["开发工具链"]
+        Gen["pascal_decl_to_mcp<br>代码生成器"]
+        LLM["llm_service<br>LLM 流式服务"]
+        Bridge["bridge<br>HTTP 桥接"]
     end
 
-    subgraph Nodes["服务节点"]
-        PasNode["pascal_agent_service<br>Pascal Agent 服务端"]
-        LLMNode["llm_service_*<br>LLM 推理服务"]
-        OtherNode["其他语言节点"]
-    end
-
-    Web -->|HTTP POST| Flask
-    PHP --> Flask
-    Node --> Flask
-    MCPServer -->|LingoFuse RPC| Core
-    Py -->|原生 FFI| Core
-    Pas -->|原生 FFI| Core
-    CPP --> Core
-    Go --> Core
-    Rust --> Core
-    Java --> Core
-    Cs --> Core
-    Flask -->|C ABI| Core
-    Core --> Nodes
+    Clients -->|MCP over HTTP/stdio| MCP
+    MCP -->|LingoFuse RPC| Agent
+    MCP -->|LingoFuse RPC| API
+    Agent -->|注册/调用| Gen
+    Agent -->|调用| LLM
+    Agent -->|暴露工具| Health
+    MCP -->|HTTP 透传| Bridge
 ```
+
+所有组件均基于 LingoFuse 底层通信框架，但 pasAgent 向上屏蔽了实现细节，为 Pascal 开发者提供了一套 **纯 Pascal 风格** 的智能体开发体验。
 
 ---
 
@@ -109,235 +84,192 @@ graph TB
 
 ```
 src/
-├── mcp_server.py              # MCP 网关核心（对接豆包/LM Studio）
-├── mcp_proxy.py               # stdio 调试代理
-├── bridge.py                  # HTTP 透传网关
-├── llm_service.py             # LLM 流式推理服务
-├── generate_agent_json.py     # MCP 客户端配置生成器
-├── language_middleware.py     # 多语言中间件
-├── pascal_agent_service.lpr   # Pascal Agent 服务端（工具提供者）
-├── pascal_agent_api.lpr       # Pascal Agent API 示例（动态注册工具）
-├── lingofuse/                 # Python 核心绑定
-│   ├── _lf_native.py          # ctypes 底层绑定
-│   ├── core.py                # DataHandle + App RAII 封装
-│   ├── server.py              # @expose 装饰器服务端
-│   ├── client.py              # C4 动态客户端
-│   └── bridge.py              # HTTP 网关
-├── CreateHealthCheck/         # 健康检查工具（Pascal）
-├── build_mcp_server.ps1       # PyInstaller 打包脚本
-├── build_pascal_agent.bat     # Pascal 编译脚本
-└── *.md                        # 各类文档
+├── pascal_agent_service.lpr     # 🏗️ Pascal 智能体服务端（核心工具提供者）
+├── pascal_agent_api.lpr         # 🔧 Pascal API 示例（动态注册工具）
+├── pascal_agent_api_ref_json.md # 工具定义参考
+├── lingofuse_import.pas         # 底层 LingoFuse C ABI 绑定
+├── lingofuse_helper.pas         # Pascal 高级封装（RAII、类型安全）
+├── mcp_server.py                # 🌉 MCP 协议网关（对接 AI 客户端）
+├── mcp_proxy.py                 # 🕵️ stdio 调试代理
+├── generate_agent_json.py       # 📄 MCP 客户端配置生成器
+├── language_middleware.py       # 多语言中间件（Python）
+├── CreateHealthCheck/           # 🩺 健康检查工具（Lazarus GUI）
+│   ├── HealthCheck.lpi          # 项目文件
+│   ├── HealthCheck.lpr          # 主程序
+│   └── frm*.pas                 # 表单单元
+├── llm-service/                 # 🤖 LLM 流式推理服务
+│   ├── llm_service.py           # 服务主程序
+│   ├── llm_test.py              # 测试客户端
+│   └── *.md                     # 使用文档
+├── tools/                       # 🛠️ 开发工具集
+│   ├── pascal_decl_to_mcp.lpr   # 代码生成器（Pascal → MCP 定义）
+│   ├── pascal_decl_to_mcp_frm.pas
+│   ├── llm_client.pas           # Pascal LLM 客户端示例
+│   ├── llm_tool_frm.pas         # LLM 工具窗体
+│   ├── pas_mcp_generator_tool.pas
+│   └── pascal_code_rule.md      # 编码规范参考
+├── lingofuse/                   # Python 核心绑定（内部依赖）
+│   ├── _lf_native.py
+│   ├── core.py
+│   ├── client.py
+│   ├── server.py
+│   └── bridge.py
+├── build_mcp_server.ps1         # 打包脚本（PyInstaller）
+├── build_pascal_agent.bat       # Pascal 编译脚本
+├── init_env.ps1                 # 环境初始化
+└── *.md                         # 各类文档
 ```
 
 ---
 
-## ⚡ 快速上手
+## ⚡ 快速上手（5 分钟体验）
 
-### 1. 启动 Pascal Agent 服务端（工具提供者）
+### 1. 启动 Pascal 智能体服务
 
 ```bash
-# 启动后端服务，注册到 ipc:agent
+# 编译或直接运行预编译 EXE
 .\pascal_agent_service.exe
 ```
 
-该服务会注册三个 API：
-- `agent_main`：返回工具列表
-- `agent_log`：接收日志消息
-- `register_agent`：动态注册工具
+服务启动后，自动注册三个内置工具：
+- `agent_main`：返回当前可用的所有工具列表（供 MCP 网关获取）
+- `agent_log`：接收并记录日志消息
+- `register_agent`：动态注册新工具（可选）
 
-### 2. 启动 MCP 网关（HTTP 模式，推荐）
+### 2. 启动 MCP 网关（供 AI 客户端调用）
 
 ```bash
-# HTTP 模式，供豆包等远程客户端调用
+# HTTP 模式（推荐，支持豆包等远程客户端）
 .\mcp_server.exe --transport http --host 0.0.0.0 --port 8000
 ```
 
-### 3. 配置豆包客户端
+网关将自动发现 `pascal_agent_service` 并暴露其所有工具。
 
-使用 `mcp_server.exe --generate-configs` 生成配置文件，或直接配置豆包的 MCP 服务器地址为：
+### 3. 接入豆包客户端
+
+在豆包中配置 MCP 服务器地址：
 
 ```
 http://<你的IP>:8000/mcp
 ```
 
-豆包将自动发现并列出所有后端工具。
+豆包将自动加载所有 Pascal 工具，您可以直接在对话中调用。
 
-### 4. Python 服务端（7 行）
-
-```python
-from lingofuse import Server
-
-app = Server("Calc")
-
-@app.expose("add")
-def add(a, b):
-    return a + b
-
-app.start_multi(["ipc:calc", "0.0.0.0:9898"])
-input("按回车退出...\n")
-app.stop()
-```
-
-### 5. Python 客户端（3 行）
-
-```python
-from lingofuse import C4
-
-c = C4("Calc", "ipc:calc")
-print(c.add(10, 20))  # 30
-```
-
-### 6. Pascal 客户端调 Python 服务
+### 4. 编写自己的 Pascal 工具（以加法为例）
 
 ```pascal
-program client;
+// 在你的 Pascal 单元中，注册一个 Call 模式 API
 uses lingofuse_helper;
 
-function Add(a,b: integer): integer;
-var Data, Res: TDataHnd;
+procedure do_add(Trigger: Pointer; Input, Output: TDataHnd); cdecl;
+var
+  a, b, sum: integer;
 begin
-  Data := TDataHnd.Create('add');
-  Data.WriteInt32(a).WriteInt32(b);
-  Res := LF.CallApp('Calc', Data, 3000);
-  if Res.Size > 0 then Result := Res.ReadInt32
-  else Result := 0;
-  Data.Free; Res.Free;
+  a := LF_ReadInt32(Input);
+  b := LF_ReadInt32(Input);
+  sum := a + b;
+  LF_WriteInt32(Output, sum);
 end;
 
-begin
-  LF.ResetPrepare;
-  LF.PrepareClient('ipc:calc', nil);
-  if LF.PrepareDone then
-    WriteLn('10 + 20 = ', Add(10,20));
-  LF.Shutdown;
-end.
+// 在 App 初始化时注册
+App.RegisterCall('add', 'Add two integers', nil, @do_add);
 ```
 
-**看到没？Python 写的服务，Pascal 直接调——这就是 LingoFuse。**
+然后重新编译服务，新工具即可被 MCP 网关自动发现。
+
+### 5. 使用代码生成器（免手写 JSON Schema）
+
+```bash
+.\pascal_decl_to_mcp.exe --input my_utils.pas --output tools.json
+```
+
+工具会自动解析 Pascal 声明，生成符合 MCP 规范的 JSON 工具定义，可直接用于 `register_agent`。
 
 ---
 
-## 🔧 编译指南
+## 🤖 代码生成体系
 
-### 编译所有 EXE（推荐）
+pasAgent 的核心竞争力之一是其 **代码生成体系**，它极大降低了 Pascal 智能体开发的门槛：
 
-所有组件均已提供预编译 EXE，直接运行即可。如需从源码编译：
+- **`pascal_decl_to_mcp`**：解析 Pascal 源代码中的类型、函数、过程声明，自动生成 MCP 工具 JSON 定义（包含参数类型、描述、required 字段等）。
+- **集成到 CI/CD**：可作为编译前/后步骤，自动同步工具定义与代码，保证一致性。
+- **支持复杂类型**：结构化类型（record、class）、枚举、数组等自动映射为 JSON Schema。
+- **可扩展**：支持自定义映射规则和注解，满足特殊业务需求。
+
+该生成器使 Pascal 开发者无需学习 MCP 协议细节，专注于业务逻辑实现。
+
+---
+
+## 🔧 编译与部署
+
+### 编译 Pascal 组件（需 Free Pascal 3.2+）
+
+```bash
+# 编译智能体服务
+fpc -Mdelphi -O2 pascal_agent_service.lpr
+
+# 编译代码生成器
+fpc -Mdelphi -O2 tools/pascal_decl_to_mcp.lpr
+
+# 编译健康检查工具（使用 Lazarus 或 lazbuild）
+lazbuild CreateHealthCheck/HealthCheck.lpi
+```
+
+### 编译 Python 组件（可选，如需源码打包）
 
 ```powershell
-# Python → EXE（需 PyInstaller）
-.\build_mcp_server.ps1
-
-# Pascal → EXE（需 Free Pascal）
-.\build_pascal_agent.bat
+.\build_mcp_server.ps1    # 打包 mcp_server.py → mcp_server.exe
 ```
+
+### 部署建议
+
+- **开发环境**：直接运行源码（需 Python 环境和 Pascal 编译器）。
+- **生产环境**：使用预编译 EXE，所有依赖（动态库、配置文件）集中放置于同一目录。
+- **容器化**：支持 Docker 部署，基础镜像可选择 Windows 或 Linux。
 
 详细编译指南请参考 [Build_Guide.md](Build_Guide.md)。
 
-### 依赖安装
-
-```bash
-# Python 依赖
-pip install fastmcp pydantic flask
-
-# Pascal 编译环境
-# 安装 Free Pascal 3.2+ 或 Lazarus
-```
-
-详细依赖说明请参考 [Dependency_Installation_Guide.md](Dependency_Installation_Guide.md)。
-
 ---
 
-## 🤖 LLM 流式服务
-
-LingoFuse 自带流式 LLM 服务示例，将 `llama-cpp-python` 的 token 流通过 `Sequenced_Notify` 推送给客户端：
-
-```bash
-# 启动服务（需模型文件同目录）
-.\llm_service_cpu.exe
-
-# 或使用 CUDA 加速版本
-.\llm_service_cu124.exe
-
-# 客户端接收流式输出
-python llm_test.py --content "print('Hello')" --prompt "解释"
-```
-
-模型文件需为 `qwen2.5-7b-instruct-q4_k_m.gguf`，放置于 EXE 同目录。下载指南请参考 [Qwen2.5-7B-Instruct-Q4_K_M.md](Qwen2.5-7B-Instruct-Q4_K_M.md)。
-
----
-
-## 🌉 HTTP 桥接
-
-```bash
-.\bridge.exe --endpoint ipc:calc --app Calc --port 8081
-```
-
-然后任意 HTTP 客户端都能调用：
-
-```bash
-curl -X POST http://127.0.0.1:8081/Calc/add -d '[10,20]'
-# 返回: 30
-```
-
----
-
-## 📚 文档
+## 📚 文档索引
 
 | 文档 | 说明 |
 |------|------|
-| [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md) | MCP Server 部署与豆包接入指南 |
-| [Build_Guide.md](Build_Guide.md) | 完整编译指南 |
-| [Dependency_Installation_Guide.md](Dependency_Installation_Guide.md) | 依赖包安装指南 |
-| [Qwen2.5-7B-Instruct-Q4_K_M.md](Qwen2.5-7B-Instruct-Q4_K_M.md) | Qwen 模型下载与部署指南 |
-| [LingoFuse_MCP_Server_Implementation_Memo.md](LingoFuse_MCP_Server_Implementation_Memo.md) | 实施备忘与技术细节 |
-
----
-
-## 🔗 相关项目
-
-- **[LingoFuse](https://github.com/PassByYou888/LingoFuse)** —— 本项目的上游，LingoFuse 核心框架
+| [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md) | 豆包及 MCP 客户端接入指南 |
+| [Build_Guide.md](Build_Guide.md) | 完整编译指南（Pascal + Python） |
+| [Dependency_Installation_Guide.md](Dependency_Installation_Guide.md) | 依赖包安装说明 |
+| [Qwen2.5-7B-Instruct-Q4_K_M.md](Qwen2.5-7B-Instruct-Q4_K_M.md) | LLM 模型下载与部署 |
+| [pascal_code_rule.md](pascal_code_rule.md) | Pascal 编码规范与工具开发指南 |
+| [LingoFuse_Python_Streaming_LLM_Guide.md](llm-service/LingoFuse_Python_Streaming_LLM_Guide.md) | LLM 流式服务使用手册 |
+| [llama_cpp_python_guide.md](llm-service/llama_cpp_python_guide.md) | llama.cpp Python 集成指南 |
 
 ---
 
 ## ❓ 常见问题
 
-**Q：克隆仓库后编译失败？**
+**Q：pasAgent 与 LingoFuse 的关系是什么？**
 
-A：请确认你是否使用了 `--recursive` 开关克隆。本仓库包含子模块，克隆时必须使用 `--recursive` 开关，否则会导致编译失败：
+A：pasAgent 基于 LingoFuse 核心通信框架，但面向 Pascal 开发者提供更高层次的智能体工具链，屏蔽了底层细节，专注于 Pascal 生态的智能体接入。
 
-```bash
-git clone --recursive https://github.com/PassByYou888/LingoFuse-pasAgent.git
-```
+**Q：我需要学习 MCP 协议才能使用吗？**
 
-如果已经克隆但忘记加 `--recursive`，可以执行以下命令补全：
+A：不需要。代码生成器和 MCP 网关自动处理协议转换，您只需编写 Pascal 业务逻辑。
 
-```bash
-git submodule update --init --recursive
-```
+**Q：如何添加自定义工具？**
 
-**Q：Python 绑定需要编译吗？**
+A：在 Pascal 服务中注册回调函数（`RegisterCall` / `RegisterNotify`），然后重新编译即可。网关会自动发现并暴露新工具。
 
-A：不需要。纯 Python + ctypes，直接使用即可。
+**Q：支持哪些 AI 客户端？**
 
-**Q：`generate_app_name()` 什么时候调？**
+A：任何兼容 MCP 协议的客户端，包括豆包、LM Studio、Claude Desktop、Continue.dev、Jan、DeepSeek 等。
 
-A：**必须在 `PrepareDone()` 成功后调用**，否则生成的名称缺少隧道 ID。
+**Q：可以在 Linux/macOS 上运行吗？**
 
-**Q：回调里能调 `LF_Call` 吗？**
+A：可以。Pascal 编译器和 LingoFuse 动态库支持跨平台，部署方式相同。
 
-A：**绝对不行！** 会死锁。想远程调用，另开线程。
+**Q：性能如何？**
 
-**Q：想多个应用绑到同一个地址？**
-
-A：设 `Overlap_Connection=True`，然后反复 `PrepareClient`。
-
-**Q：动态库找不到？**
-
-A：把 `LingoFuse64.dll` 放到当前目录或加到 PATH。
-
-**Q：听说代码注释很全，能喂给 AI？**
-
-A：能。`lingofuse_import.pas` 每个函数都有完整注释，把全部代码喂给 AI，AI 能解析出结构化接口描述，然后由代码生成器一键产出多语言客户端——**比你手动写快 100 倍，还不会出错**。
+A：基于 LingoFuse 的 IPC 通信，延迟 < 1ms，单节点吞吐量 12k+ 请求/秒，满足绝大部分企业级需求。
 
 ---
 
@@ -345,14 +277,14 @@ A：能。`lingofuse_import.pas` 每个函数都有完整注释，把全部代�
 
 **老张（QQ: 600585）**
 
-看不惯跨语言调用得写一箩筐胶水代码，干脆撸了 LingoFuse。欢迎来撩、来喷、来 PR——**Star 是最好的催更。**
+专注 Pascal 生态十余年，致力于让古老而强大的 Pascal 语言焕发新生。pasAgent 是为 Pascal 开发者量身打造的智能体接入方案，欢迎反馈、建议和贡献。
 
 ---
 
 ## 📄 许可证
 
-**MIT** ——拿去用，拿去改，拿去卖，都不用来谢我。
+**MIT** —— 允许自由使用、修改、分发，无需书面许可。
 
 ---
 
-*项目始于 2026 年，持续进化中。有问题提 Issue，急事加 Q。*
+*项目始于 2026 年，持续迭代中。提 Issue 或加 Q 交流。*
