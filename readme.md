@@ -48,7 +48,6 @@
 | **MCP 协议网关** | 把工具翻译成 AI 能听懂的语言（MCP 协议） | 部署服务的你 |
 | **代码生成器** | 从 Pascal 声明一键生成工具定义，免手写 JSON | 开发阶段的你 |
 | **LLM 流式服务** | 在本地跑大语言模型，让 AI 不依赖网络 | 想完全离线的你 |
-| **健康检查 & 调试工具** | 确保一切正常运行 | 运维阶段的你 |
 
 **说白了：这是一套让“Pascal 老代码”能接入“AI 新世界”的完整解决方案。**
 
@@ -202,7 +201,7 @@ App.RegisterCall('mul', 'Multiply two integers', nil, @do_mul);
 如果你不想手动写注册代码，可以用 `tools/pascal_decl_to_mcp.exe`：
 
 ```cmd
-pascal_decl_to_mcp.exe --input my_utils.pas --output tools.json
+pascal_decl_to_mcp.exe
 ```
 
 它会解析你的 Pascal 源码，自动生成 MCP 工具定义 JSON，你可以直接用 `register_agent` 注册，或者直接喂给 mcp_server。
