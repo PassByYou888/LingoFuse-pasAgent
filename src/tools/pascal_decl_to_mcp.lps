@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CONFIG>
+  <ProjectSession>
+    <PathDelim Value="\"/>
+    <Version Value="12"/>
+    <BuildModes Active="Default"/>
+    <Units>
+      <Unit>
+        <Filename Value="pascal_decl_to_mcp.lpr"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <CursorPos X="40" Y="29"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="pascal_decl_to_mcp_frm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="pascal_decl_to_mcp_form"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Form"/>
+        <IsVisibleTab Value="True"/>
+        <CursorPos X="73" Y="6"/>
+        <UsageCount Value="28"/>
+        <Loaded Value="True"/>
+        <LoadedDesigner Value="True"/>
+      </Unit>
+      <Unit>
+        <Filename Value="pas_mcp_generator_tool.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="41"/>
+        <CursorPos X="44" Y="62"/>
+        <UsageCount Value="28"/>
+        <Bookmarks Count="1">
+          <Item0 X="5" Y="908" Left="1" Top="892" ID="1"/>
+        </Bookmarks>
+      </Unit>
+      <Unit>
+        <Filename Value="..\pascal\lingofuse_helper.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\pascal\lingofuse_import.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="67"/>
+        <CursorPos X="26" Y="104"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.Int128.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.Json.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="199"/>
+        <CursorPos X="16" Y="126"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.MemoryStream.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.Notify.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.OpCode.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.Status.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.UnicodeMixedLib.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="849"/>
+        <CursorPos Y="889"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.UReplace.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.HashList.Templet.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="llm_client.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\ScriptEngine\Z.Pascal_Func_Tool.pas"/>
+        <IsPartOfProject Value="True"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="1249"/>
+        <CursorPos X="11" Y="1254"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\Z.Parsing.pas"/>
+        <IsPartOfProject Value="True"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="llm_tool_frm.pas"/>
+        <IsPartOfProject Value="True"/>
+        <ComponentName Value="llm_tool_form"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Form"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="130"/>
+        <CursorPos X="55" Y="143"/>
+        <UsageCount Value="28"/>
+      </Unit>
+      <Unit>
+        <Filename Value="pascal_func_model.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="544"/>
+        <CursorPos X="64" Y="570"/>
+        <UsageCount Value="21"/>
+      </Unit>
+      <Unit>
+        <Filename Value="D:\LingoFuse-pasAgent\src\CreateHealthCheck\frmNewRecord.pas"/>
+        <ComponentName Value="NewRecordForm"/>
+        <HasResources Value="True"/>
+        <ResourceBaseClass Value="Form"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="54"/>
+        <CursorPos X="47" Y="77"/>
+        <UsageCount Value="9"/>
+      </Unit>
+      <Unit>
+        <Filename Value="..\..\ObjectData\Z.ZDB.ItemStream_LIB.pas"/>
+        <EditorIndex Value="-1"/>
+        <TopLine Value="297"/>
+        <CursorPos X="49" Y="313"/>
+        <UsageCount Value="10"/>
+      </Unit>
+    </Units>
+    <JumpHistory HistoryIndex="3">
+      <Position>
+        <Filename Value="pascal_decl_to_mcp_frm.pas"/>
+        <Caret Line="364" Column="99" TopLine="349"/>
+      </Position>
+      <Position>
+        <Filename Value="pascal_decl_to_mcp_frm.pas"/>
+        <Caret Line="362" Column="101" TopLine="349"/>
+      </Position>
+      <Position>
+        <Filename Value="pascal_decl_to_mcp_frm.pas"/>
+        <Caret Line="4" Column="38"/>
+      </Position>
+      <Position>
+        <Filename Value="pascal_decl_to_mcp_frm.pas"/>
+        <Caret Line="6" Column="73"/>
+      </Position>
+    </JumpHistory>
+    <RunParams>
+      <FormatVersion Value="2"/>
+      <Modes ActiveMode=""/>
+    </RunParams>
+  </ProjectSession>
+</CONFIG>
