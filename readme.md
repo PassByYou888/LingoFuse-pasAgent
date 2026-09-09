@@ -6,11 +6,23 @@
 
 ---
 
+> ## 🚀 新手用户看这里！
+> 
+> 如果你是**第一次接触智能体和 LLM**，不想折腾编译和环境配置，**直接下载预编译包**即可开始体验：
+> 
+> 👉 **[下载预编译包（Pre-built Package）](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)**
+> 
+> 下载后解压，按照 [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md) 的说明操作，**10 分钟就能让 AI 调用你的第一个 Pascal 工具**。
+> 
+> 预编译包包含所有必需的可执行文件和动态库，开箱即用，无需安装任何开发环境。
+
+---
+
 ## 🎯 这是什么？
 
 **pasAgent** 是一套 **工业级 Pascal 智能体（Agent）技术体系**，它的核心使命是：**让你用 Pascal 写的代码，能被 AI 直接调用。**
 
-传统上，AI（如Claude Desktop, LM Studio）只能调用 Python 或 JavaScript 写的工具。如果你想让自己积累多年的 Pascal 业务逻辑被 AI 使用，过去需要重写、封装、搭 HTTP 服务……而现在，pasAgent 让你**直接用 Pascal 写工具函数，AI 就能像调用内置功能一样调用它。**
+传统上，AI（如豆包、LM Studio）只能调用 Python 或 JavaScript 写的工具。如果你想让自己积累多年的 Pascal 业务逻辑被 AI 使用，过去需要重写、封装、搭 HTTP 服务……而现在，pasAgent 让你**直接用 Pascal 写工具函数，AI 就能像调用内置功能一样调用它。**
 
 ### 这个体系包含什么？
 
@@ -30,16 +42,17 @@
 
 下面是一个**零基础新手**走通“让 AI 调用我写的 Pascal 代码”的完整路径。你不需要提前理解任何概念，跟着走就行。
 
-### 第 0 步：准备文件
+### 第 0 步：获取预编译包（新手推荐）
 
-把所有 EXE 和 DLL 放进同一个文件夹（建议 `C:\pasAgent`），确保这些文件存在：
-- `LingoFuse64.dll` + `z_ipc_64.dll`（核心通信库）
-- `pascal_agent_service.exe`（工具管理服务）
-- `pascal_agent_api.exe`（工具注册示例）
-- `mcp_server.exe`（MCP 网关）
-- `mcp_configs/` 文件夹（由 `mcp_server.exe --generate-configs` 生成）
+**如果你是新手，强烈建议直接下载预编译包**，跳过所有编译和环境配置步骤：
 
-**没有这些文件？** 参考 [Build_Guide.md](Build_Guide.md) 从源码编译，或从发布页面下载预编译包。
+1. 访问 [预编译包发布页](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
+2. 下载最新版本的压缩包
+3. 解压到任意目录（建议 `C:\pasAgent`）
+
+预编译包包含所有必需的可执行文件（EXE）和动态库（DLL），**解压即用，无需安装 Python、Free Pascal 或任何开发工具**。
+
+> **如果你是从源码开始**，可以参考 [Build_Guide.md](Build_Guide.md) 自行编译，或查看 [Dependency_Installation_Guide.md](Dependency_Installation_Guide.md) 安装依赖。
 
 ### 第 1 步：启动“工具管理服务”
 
@@ -69,7 +82,7 @@ pascal_agent_api.exe
 mcp_server.exe --generate-configs
 ```
 
-它会生成一个 `mcp_configs` 文件夹，里面是为不同 AI 客户端（Claude、LM Studio 等）准备的配置文件。**这一步只需要做一次**。
+它会生成一个 `mcp_configs` 文件夹，里面是为不同 AI 客户端（豆包、LM Studio、Claude 等）准备的配置文件。**这一步只需要做一次**。
 
 ### 第 4 步：启动 MCP 网关
 
@@ -83,7 +96,7 @@ mcp_server.exe
 
 ### 第 5 步：告诉 AI 客户端去哪里找工具
 
-现在打开你的 AI 客户端（LM Studio 等），把 `mcp_configs` 里对应的配置文件内容粘贴进去。**具体怎么操作？** 打开 [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md)，里面有每一步的截图指引——**不懂就问豆包，拍照发过去，它会指导你。**
+现在打开你的 AI 客户端（豆包、LM Studio 等），把 `mcp_configs` 里对应的配置文件内容粘贴进去。**具体怎么操作？** 打开 [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md)，里面有每一步的截图指引——**不懂就问豆包，拍照发过去，它会指导你。**
 
 ### 第 6 步：开始使用
 
@@ -97,7 +110,7 @@ mcp_server.exe
 graph LR
     User[你] -->|用 Pascal 写工具| Pas[pascal_agent_service]
     Pas -->|注册工具| MCP[mcp_server]
-    MCP -->|暴露为 MCP 协议| AI[Claude / LM Studio]
+    MCP -->|暴露为 MCP 协议| AI[豆包 / LM Studio]
     AI -->|用户提问| MCP
     MCP -->|调用工具| Pas
     Pas -->|返回结果| MCP
@@ -215,7 +228,7 @@ A：**不需要。** 所有组件都在本地运行，数据不出内网。你�
 
 **Q：我是新手，能成功吗？**
 
-A：**能。** 按照 [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md) 的步骤，每一步都有解释。遇到不懂的，拍照问豆包，它会手把手教你。
+A：**能。** 下载[预编译包](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)，按照 [MCP_SERVER_DOUBAO_GUIDE.md](MCP_SERVER_DOUBAO_GUIDE.md) 的步骤操作，每一步都有解释。遇到不懂的，拍照问豆包，它会手把手教你。
 
 **Q：我是老手，想深入定制？**
 
