@@ -240,7 +240,7 @@ A：看源码。`pascal_agent_service.lpr` 和 `lingofuse_helper.pas` 是起点�
 
 **老张（QQ: 600585）**
 
-专注 Pascal 生态十余年。看不惯老代码被新技术抛弃，做了这套让 Pascal 接入 AI 的完整方案。欢迎反馈、建议、PR。
+欢迎反馈、建议、PR。骚扰。
 
 ---
 
