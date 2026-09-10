@@ -1,8 +1,8 @@
 # Build_Guide.md
 
-## LingoFuse 组件编译指南（Windows）
+## LingoFuse-pasAgent 组件编译指南（Windows）
 
-本文档介绍如何将 LingoFuse 项目中的 Python 脚本和 Pascal 源代码编译为可执行文件（EXE）。所有编译均在 Windows 环境下完成，使用的工具包括 **PyInstaller**（Python → EXE）和 **Free Pascal / Lazarus**（Pascal → EXE）。
+本文档介绍如何将 LingoFuse-pasAgent 中的 Python 脚本和 Pascal 源代码编译为可执行文件（EXE）。所有编译均在 Windows 环境下完成，使用的工具包括 **PyInstaller**（Python → EXE）和 **Lazarus / Free Pascal**（Pascal → EXE）。
 
 ---
 
@@ -11,19 +11,16 @@
 1. [前置准备](#1-前置准备)
 2. [Python 组件编译](#2-python-组件编译)
    - 2.1 环境准备
-   - 2.2 编译 mcp_server.exe
-   - 2.3 编译 mcp_proxy.exe
-   - 2.4 编译 bridge.exe
-   - 2.5 编译 llm_service_*.exe
+   - 2.2 使用脚本编译 mcp_server.exe（含 mcp_proxy.exe）
+   - 2.3 使用脚本编译 bridge.exe
+   - 2.4 使用脚本编译 llm_service_*.exe
 3. [Pascal 组件编译](#3-pascal-组件编译)
    - 3.1 环境准备
-   - 3.2 编译 pascal_agent_service.exe
-   - 3.3 编译 pascal_agent_api.exe
-   - 3.4 编译 HealthCheck.exe
-   - 3.5 编译 pascal_decl_to_mcp.exe（如果有）
-4. [打包脚本说明](#4-打包脚本说明)
+   - 3.2 使用 build_pascal_agent.bat 一键编译
+   - 3.3 单独编译某个 Pascal 项目（使用 lazbuild）
+4. [LingoFuse 动态库部署](#4-lingofuse-动态库部署)
 5. [常见问题](#5-常见问题)
-6. [附录：目录结构](#6-附录目录结构)
+6. [附录：编译产物目录](#6-附录编译产物目录)
 
 ---
 
@@ -33,217 +30,246 @@
 - Windows 10/11（64 位推荐）
 
 ### 1.2 必需软件
+
 | 软件 | 用途 | 获取方式 |
 |------|------|----------|
 | **Python 3.7+**（64 位） | 运行 PyInstaller 及 Python 脚本 | [python.org](https://python.org) |
 | **PyInstaller** | 将 Python 脚本打包为 EXE | `pip install pyinstaller` |
-| **Free Pascal 3.2+**（或 Lazarus） | 编译 Pascal 源文件 | [freepascal.org](https://freepascal.org) 或 [Lazarus IDE](https://lazarus-ide.org) |
+| **Lazarus**（含 Free Pascal 3.2+） | 编译 Pascal 项目（必须使用 lazbuild 或 IDE） | [Lazarus IDE](https://lazarus-ide.org) |
 | **LingoFuse 动态库** | 所有 EXE 的运行时依赖 | 由 LingoFuse 项目提供（`LingoFuse64.dll`） |
 
-### 1.3 目录结构（关键）
+> **注意**：Pascal 项目的编译**不要直接使用 `fpc` 命令行**，因为项目依赖复杂的单元搜索路径（Z 框架、LingoFuse 等）。必须使用 `lazbuild` 或 Lazarus IDE，它们能正确读取 `.lpi` 文件中的配置。
+
+### 1.3 源代码目录结构
+
+本项目根目录（假设为 `D:\git\LingoFuse-pasAgent\src`）包含以下关键脚本和文件：
+
 ```
-D:\LingoFuse-pasAgent\src\
-├── build_mcp_server.ps1          # PyInstaller 打包脚本（Python→EXE）
-├── build_pascal_agent.bat        # Pascal 编译批处理（可选）
+src/
+├── build_mcp_server.ps1          # 编译 mcp_server.exe 和 mcp_proxy.exe
+├── build_bridge.ps1              # 编译 bridge.exe
+├── build_llm_service.ps1         # 编译 llm_service.exe（CPU / CUDA / Vulkan 等版本）
+├── build_pascal_agent.bat        # 一键编译所有 Pascal 项目
 ├── generate_agent_json.py        # 配置生成器
-├── language_middleware.py        # 依赖库
-├── mcp_proxy.py                  # 代理源码
+├── language_middleware.py        # MCP 依赖
 ├── mcp_server.py                 # MCP 服务器源码
-├── pascal_agent_api.lpi          # Lazarus 项目文件
-├── pascal_agent_api.lpr          # 主程序源码
-├── pascal_agent_service.lpi
-├── pascal_agent_service.lpr
-├── lingofuse\                    # Python 核心包（编译时会打包）
-│   ├── bridge.py
-│   ├── client.py
-│   ├── core.py
-│   ├── ...
-├── CreateHealthCheck\            # 健康检查 Pascal 项目
-│   ├── HealthCheck.lpi
-│   ├── HealthCheck.lpr
+├── mcp_proxy.py                  # 代理源码
+├── pascal_agent_service.lpi      # Lazarus 项目文件
+├── pascal_agent_api.lpi
+├── lingofuse/                    # Python 核心包（编译时会打包）
+├── llm-service/                  # LLM 服务源码
+│   ├── llm_service.py
 │   └── ...
-└── (其他文件)
+├── CreateHealthCheck/            # 健康检查 Pascal 项目
+│   ├── HealthCheck.lpi
+│   └── ...
+└── tools/                        # 开发工具（pascal_decl_to_mcp 等）
 ```
 
 ---
 
 ## 2. Python 组件编译
 
-所有 Python 脚本均可通过 PyInstaller 打包为独立的 EXE。以下步骤假设您已在项目根目录（`D:\LingoFuse-pasAgent\src`）打开 PowerShell 或命令提示符。
+所有 Python 脚本均可通过 PyInstaller 打包为独立的 EXE。项目已在 `src` 目录提供了 PowerShell 脚本，**强烈建议使用这些脚本**，它们已配置好必要的参数（依赖收集、数据文件等）。
 
 ### 2.1 环境准备
 
+打开 PowerShell，进入 `src` 目录，执行以下命令安装依赖：
+
 ```powershell
-# 安装 PyInstaller（如果尚未安装）
+cd D:\git\LingoFuse-pasAgent\src
+pip install -r requirements.txt
 pip install pyinstaller
-
-# 确保依赖库已安装（见 requirements.txt）
-pip install -r requirements.txt   # 若存在
-# 或手动安装：pip install fastmcp pydantic flask requests ...
 ```
 
-### 2.2 编译 mcp_server.exe
+### 2.2 编译 mcp_server.exe（含 mcp_proxy.exe）
 
-使用提供的 `build_mcp_server.ps1` 脚本（若不存在，可按以下命令手动执行）：
+运行脚本：
 
 ```powershell
-# 单文件模式，将所有依赖打包进一个 EXE
-pyinstaller --onefile --name mcp_server --console `
-  --add-data "lingofuse;lingofuse" `
-  --hidden-import fastmcp `
-  --hidden-import pydantic `
-  --hidden-import language_middleware `
-  mcp_server.py
+.\build_mcp_server.ps1
 ```
 
-**参数说明**：
-- `--onefile`：生成单个 EXE。
-- `--add-data "lingofuse;lingofuse"`：将 `lingofuse` 包作为数据目录打包，使 EXE 能找到该模块。
-- `--hidden-import`：显式导入一些动态加载的模块，防止 PyInstaller 遗漏。
-
-编译完成后，`mcp_server.exe` 将出现在 `dist\` 目录下。
-
-### 2.3 编译 mcp_proxy.exe
+脚本内容大致如下（供参考）：
 
 ```powershell
-pyinstaller --onefile --name mcp_proxy --console mcp_proxy.py
+pyinstaller --onefile `
+    --collect-all fastmcp `
+    --collect-all pydantic `
+    --collect-all tzdata `
+    --hidden-import language_middleware `
+    --paths . `
+    --add-data "lingofuse;lingofuse" `
+    mcp_server.py
+
+pyinstaller --onefile `
+    --name mcp_proxy `
+    --clean `
+    --noconfirm `
+    mcp_proxy.py
 ```
 
-### 2.4 编译 bridge.exe
+编译完成后，在 `dist\` 目录下将生成：
 
-`bridge.py` 依赖 Flask，需包含整个 `lingofuse` 包：
+- `mcp_server.exe`
+- `mcp_proxy.exe`
+
+### 2.3 编译 bridge.exe
+
+运行脚本：
 
 ```powershell
-pyinstaller --onefile --name bridge --console `
-  --add-data "lingofuse;lingofuse" `
-  --hidden-import flask `
-  lingofuse\bridge.py
+.\build_bridge.ps1
 ```
 
-### 2.5 编译 llm_service_*.exe
-
-`llm_service.py` 通常有多个版本（CPU、CUDA、Vulkan），编译时需指定不同后端依赖（如 `llama-cpp-python` 或 `transformers`）。以 CPU 版本为例：
+脚本内容大致如下：
 
 ```powershell
-pyinstaller --onefile --name llm_service_cpu --console `
-  --add-data "lingofuse;lingofuse" `
-  --hidden-import llama_cpp `
-  --hidden-import transformers `
-  llm_service.py
+pyinstaller --onefile `
+    --collect-all flask `
+    --paths . `
+    --hidden-import lingofuse `
+    lingofuse\bridge.py
 ```
 
-若需 CUDA 或 Vulkan 版本，确保已安装对应的 Python 包，并调整名称。
+编译完成后，生成 `bridge.exe`。
+
+### 2.4 编译 llm_service_*.exe
+
+`llm_service.py` 位于 `llm-service\` 目录，可生成多个版本（CPU、CUDA、Vulkan 等）。运行脚本：
+
+```powershell
+.\build_llm_service.ps1
+```
+
+脚本内容大致如下：
+
+```powershell
+pyinstaller --onefile `
+    --paths . `
+    --collect-all llama_cpp `
+    --collect-all lingofuse `
+    --hidden-import llama_cpp `
+    --hidden-import lingofuse `
+    llm-service\llm_service.py
+```
+
+编译完成后，在 `dist\` 目录下生成 `llm_service_cpu.exe` 等（具体命名取决于脚本）。
+
+> 如需支持 CUDA 或 Vulkan，请确保已安装对应的 Python 包（`llama-cpp-python` 的 GPU 版本），并修改脚本中的 `--name`。
 
 ---
 
 ## 3. Pascal 组件编译
 
-Pascal 源码使用 Free Pascal 或 Lazarus IDE 编译。推荐使用 Lazarus（提供图形界面）或直接调用 `fpc` 命令行。
+Pascal 项目必须使用 **Lazarus**（或 `lazbuild`）编译，**不要直接调用 `fpc`**。
 
 ### 3.1 环境准备
 
-- 安装 Free Pascal（或 Lazarus）。
-- 确保编译器 `fpc.exe` 在 PATH 中，或使用 Lazarus 的 `lazbuild.exe`。
+- 安装 Lazarus IDE（包含 Free Pascal 编译器）。
+- 确保 `lazbuild.exe` 位于系统 PATH 中，或使用绝对路径。
 
-### 3.2 编译 pascal_agent_service.exe
+### 3.2 使用 build_pascal_agent.bat 一键编译
 
-**命令行方式**（在项目根目录执行）：
+在项目根目录（`src`）双击或命令行执行：
 
-```cmd
-fpc -Mdelphi -O2 -vw -Fu..\ZCore -Fu..\ZJson -Fu..\LingoFuse-Export -Fl..\Binary -FE. pascal_agent_service.lpr
+```bat
+build_pascal_agent.bat
 ```
 
-但由于该项目引用了多个外部单元（Z.Core, Z.Json, lingofuse_import 等），推荐使用 **Lazarus IDE** 打开 `pascal_agent_service.lpi`，然后点击“编译”（Ctrl+F9）。编译后的 EXE 将生成在项目输出目录（默认为 `lib\` 或 `.\`）。
+该脚本内容如下：
 
-若使用 `build_pascal_agent.bat`，可直接双击执行（需确保已配置好路径）。
+```bat
+lazbuild.exe -B ./pascal_agent_service.lpi
+lazbuild.exe -B ./pascal_agent_api.lpi
+lazbuild.exe -B ./CreateHealthCheck/HealthCheck.lpi
+echo 所有项目编译完成。
+timeout /t 5 /nobreak >nul
+```
 
-### 3.3 编译 pascal_agent_api.exe
+执行后，将编译并生成：
 
-类似，打开 `pascal_agent_api.lpi` 并编译。
+- `pascal_agent_service.exe`
+- `pascal_agent_api.exe`
+- `HealthCheck.exe`（在 `CreateHealthCheck\` 目录下）
 
-### 3.4 编译 HealthCheck.exe
+### 3.3 单独编译某个 Pascal 项目（使用 lazbuild）
 
-进入 `CreateHealthCheck\` 子目录，打开 `HealthCheck.lpi` 并编译。
+如果只想编译某个项目，可以在命令行使用 `lazbuild`：
 
-### 3.5 编译 pascal_decl_to_mcp.exe
+```cmd
+lazbuild.exe -B .\pascal_agent_service.lpi
+```
 
-（如果有对应 `.lpr` 或 `.lpi`）同样方法编译。
+或者使用 Lazarus IDE：打开 `.lpi` 文件，按 `Ctrl+F9` 编译。
 
 ---
 
-## 4. 打包脚本说明
+## 4. LingoFuse 动态库部署
 
-项目中提供的 `build_mcp_server.ps1` 是一个 PowerShell 脚本，用于自动化编译 `mcp_server.exe`。其内容可参考：
+所有编译出的 EXE 运行时都需要 `LingoFuse64.dll`（Windows）或 `liblingofuse.so`（Linux）。该库由 LingoFuse 核心项目提供，不包含在本仓库中。
 
-```powershell
-# build_mcp_server.ps1
-pyinstaller --onefile --name mcp_server --console `
-  --add-data "lingofuse;lingofuse" `
-  --hidden-import fastmcp `
-  --hidden-import pydantic `
-  --hidden-import language_middleware `
-  --hidden-import generate_agent_json `
-  mcp_server.py
-```
+**推荐部署方式：将动态库目录加入系统 PATH。**
 
-**注意**：如果编译后运行 EXE 出现“找不到模块”错误，可能需要调整 `--add-data` 或 `--hidden-import`。可参考 `pyi-makespec` 生成 spec 文件进行精细控制。
+1. 克隆 LingoFuse 仓库（需 `--recursive` 拉取子模块）：
+   ```bash
+   git clone --recursive https://github.com/PassByYou888/LingoFuse.git
+   ```
+2. 将 LingoFuse 的 `Binary` 目录（或包含 `LingoFuse64.dll` 的目录）加入系统 `PATH`：
+   - **Windows（永久）**：系统属性 → 环境变量 → 编辑 `Path`，添加该目录。
+   - **Windows（临时）**：在 PowerShell 中执行 `$env:PATH = "D:\LingoFuse\Binary;$env:PATH"`。
+   - **Linux/macOS**：`export PATH=/path/to/LingoFuse/Binary:$PATH`。
+
+这样系统就能自动找到动态库，无需将 DLL 复制到每个 EXE 目录。
+
+**备选方案**：将动态库复制到每个 EXE 所在目录（例如 `dist\`）。
 
 ---
 
 ## 5. 常见问题
 
 ### Q1: 运行 EXE 时提示 “Failed to load LingoFuse64.dll”
-- 确保 `LingoFuse64.dll` 与 EXE 在同一目录，或在系统 PATH 中。
-- 检查动态库是否与 EXE 架构一致（64 位 vs 32 位）。
+- 确保 `LingoFuse64.dll` 与 EXE 在同一目录，或已在系统 `PATH` 中。
+- 检查动态库位数是否与 EXE 一致（64 位 vs 32 位）。
 
 ### Q2: PyInstaller 打包后运行报 “ModuleNotFoundError”
-- 添加 `--hidden-import` 显式导入缺失的模块。
-- 若需包含整个包，使用 `--add-data "package;package"`。
+- 可尝试增加 `--hidden-import` 参数，或检查 `--add-data` 是否正确包含 `lingofuse` 包。
+- 参考项目提供的脚本，它们已配置好所需参数。
 
 ### Q3: Pascal 编译报 “Can't find unit Z.Core”
-- 检查项目文件的搜索路径（`-Fu` 参数），确保引用的单元路径正确。
-- 在 Lazarus 中，需将 ZCore 等包的源码目录添加到“项目选项”→“编译器选项”→“其他单元文件”中。
+- 确保使用 `lazbuild` 编译，因为 `.lpi` 中已配置单元搜索路径。
+- 若手动调用 `fpc`，需手动指定 `-Fu` 路径，极易出错，请改用 `lazbuild`。
 
 ### Q4: 编译的 EXE 体积过大
 - 使用 `--upx-dir` 参数启用 UPX 压缩（需先下载 UPX），可显著减小体积。
-- 也可使用 `--onefile` 虽会增大解压开销，但便于分发。
+- 但 `--onefile` 模式本身会增大启动解压开销，若体积敏感，可改用 `--onedir` 模式。
 
 ### Q5: 使用 `--generate-configs` 时找不到 `generate_agent_json` 模块
 - 确保 `generate_agent_json.py` 在相同目录，且打包时已包含（`--add-data` 或 `--hidden-import`）。
 
 ---
 
-## 6. 附录：目录结构
+## 6. 附录：编译产物目录
 
 最终编译后，建议将所有 EXE 和依赖动态库放在同一目录，以便分发：
 
 ```
-C:\Temp\temp2\
-├── LingoFuse64.dll
+C:\temp2\dist\
+├── LingoFuse64.dll                    # 从 LingoFuse 仓库复制或通过 PATH 提供
 ├── mcp_server.exe
 ├── mcp_proxy.exe
 ├── bridge.exe
-├── llm_service_cpu.exe
-├── llm_service_cu124.exe
-├── llm_service_vulkan.exe
+├── llm_service_cpu.exe                # 或 llm_service_cu124.exe / vulkan 等
 ├── pascal_agent_service.exe
 ├── pascal_agent_api.exe
-├── HealthCheck.exe
-├── pascal_decl_to_mcp.exe
-├── qwen2.5-7b-instruct-q4_k_m.gguf   (可选，用于 LLM 服务)
+├── HealthCheck.exe                    # 来自 CreateHealthCheck 目录
+├── pascal_decl_to_mcp.exe             # 若使用 tools 项目编译
+├── qwen2.5-7b-instruct-q4_k_m.gguf    # 可选，用于 LLM 服务
 └── (配置文件、文档等)
 ```
 
 ---
 
-## 7. 补充说明
-
-- **Python 版本**：建议使用与 PyInstaller 兼容的 Python 版本（3.7~3.12 均可）。
-- **Pascal 版本**：Free Pascal 3.2.2 以上。
-- **多平台支持**：若需 Linux/macOS EXE，请在对应平台上执行 PyInstaller，并调整 `--add-data` 路径分隔符（Linux/macOS 使用 `:` 而非 `;`）。
-
----
-
-**文档版本**：V1.0  
-**最后更新**：2026-09-09  
-**维护者**：LingoFuse 团队
+**文档版本**：V2.0  
+**最后更新**：2026-09-10  
+**维护者**：LingoFuse-pasAgent 团队
