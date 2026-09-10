@@ -89,12 +89,12 @@ flowchart TB
 
 ## 📦 组件清单
 
-| 组件 | 作用 | 谁关心 |
-|------|------|--------|
-| **Pascal 智能体服务端** | 把你的 Pascal 函数注册为工具 | 写 Pascal 的你 |
-| **MCP 协议网关** | 把工具翻译成 MCP 协议 | 部署服务的你 |
-| **代码生成器** | 从 Pascal 声明一键生成工具定义 | 开发阶段的你 |
-| **LLM 流式服务** | 本地跑大模型，完全离线 | 想断网的你 |
+| 组件                    | 作用                           | 谁关心         |
+| ----------------------- | ------------------------------ | -------------- |
+| **Pascal 智能体服务端** | 把你的 Pascal 函数注册为工具   | 写 Pascal 的你 |
+| **MCP 协议网关**        | 把工具翻译成 MCP 协议          | 部署服务的你   |
+| **代码生成器**          | 从 Pascal 声明一键生成工具定义 | 开发阶段的你   |
+| **LLM 流式服务**        | 本地跑大模型，完全离线         | 想断网的你     |
 
 ---
 
@@ -200,46 +200,51 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 那里已经打包好了所有需要的动态库，**下载解压即用**，省去编译环境折腾。
 
----
+**⚠️ 运行环境依赖**：  
+预编译 DLL 使用 **Visual Studio 2022** 编译，运行时需要安装 **VS2022 可再发行组件（VC++ Redistributable）**。  
+请从微软官方下载并安装对应架构的版本：
 
-## 🌟 关于开放性
+- [VC++ Redistributable for Visual Studio 2022 (x86/x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
 
-**[pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent) 是 [LingoFuse](https://github.com/PassByYou888/LingoFuse) 的分支项目**，两者均为完全开放、非商业性的开源项目。
+  ---
 
-- ✅ **永久免费**：MIT 许可证
-- ✅ **无商业捆绑**：无收费功能、无付费订阅
-- ✅ **社区驱动**：决策来自社区贡献者
-- ✅ **透明开发**：源码全公开，构建可复现
+  ## 🌟 关于开放性
 
----
+  **[pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent) 是 [LingoFuse](https://github.com/PassByYou888/LingoFuse) 的分支项目**，两者均为完全开放、非商业性的开源项目。
+  - ✅ **永久免费**：MIT 许可证
+  - ✅ **无商业捆绑**：无收费功能、无付费订阅
+  - ✅ **社区驱动**：决策来自社区贡献者
+  - ✅ **透明开发**：源码全公开，构建可复现
 
-## ❓ 常见问题
+  ---
 
-| 问题 | 回答 |
-|------|------|
-| 需要懂 MCP 协议吗？ | **不需要**，写 Pascal 就行 |
-| 只支持豆包吗？ | **支持所有 MCP 客户端**：豆包 / LM Studio / Claude / Continue.dev / Jan / DeepSeek |
-| 只能做加减乘除吗？ | **任何 Pascal 函数**：数据库、文件、硬件、GUI…… |
-| 需要联网吗？ | **不需要**，所有组件本地运行 |
-| 我的函数操作 UI 能接入吗？ | **能**，生成代码预留主线程同步接口 |
-| 缺 DLL 又不想编译？ | **去[预编译包发布页](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)下载，解压即用** |
+  ## ❓ 常见问题
 
----
+  | 问题                       | 回答                                                                                                            |
+  | -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+  | 需要懂 MCP 协议吗？        | **不需要**，写 Pascal 就行                                                                                      |
+  | 只支持豆包吗？             | **支持所有 MCP 客户端**：豆包 / LM Studio / Claude / Continue.dev / Jan / DeepSeek                              |
+  | 只能做加减乘除吗？         | **任何 Pascal 函数**：数据库、文件、硬件、GUI……                                                                 |
+  | 需要联网吗？               | **不需要**，所有组件本地运行                                                                                    |
+  | 我的函数操作 UI 能接入吗？ | **能**，生成代码预留主线程同步接口                                                                              |
+  | 缺 DLL 又不想编译？        | **去[预编译包发布页](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)下载，解压即用** |
 
-## 👤 关于作者
+  ---
 
-**老张（QQ: 600585）**
+  ## 👤 关于作者
 
-看不惯跨语言调用得写一箩筐胶水代码，干脆撸了 LingoFuse；又看不惯 Pascal 老代码接不进 AI 时代，顺手撸了 pasAgent。
+  **老张（QQ: 600585）**
 
-欢迎反馈、建议、PR。
+  看不惯跨语言调用得写一箩筐胶水代码，干脆撸了 LingoFuse；又看不惯 Pascal 老代码接不进 AI 时代，顺手撸了 pasAgent。
 
----
+  欢迎反馈、建议、PR。
 
-## 📄 许可证
+  ---
 
-**MIT** —— 自由使用、修改、分发。
+  ## 📄 许可证
 
----
+  **MIT** —— 自由使用、修改、分发。
 
-*项目始于 2026 年，持续迭代中。有问题提 Issue，急事加 Q。*
+  ---
+
+  *项目始于 2026 年，持续迭代中。有问题提 Issue，急事加 Q。*
