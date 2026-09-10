@@ -1,27 +1,62 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-generate_agent_json.py - MCP Client Configuration Generator
+generate_agent_json.py - MCP Client Configuration Generator (v2.5)
 
 This module generates JSON configuration files and Markdown documentation
-for various MCP clients (LM Studio, Claude Desktop, Continue.dev, Jan, Generic,
-and DeepSeek) supporting stdio (direct and proxy), Streamable HTTP (recommended),
-and legacy SSE transports.
+for various MCP clients (LM Studio, Claude Desktop, Continue.dev, Jan,
+Generic, DeepSeek). It supports:
 
-It is designed to be imported and called by mcp_server.py, but can also
-run standalone.
+    * stdio (direct)
+    * stdio (via mcp_proxy, for debugging)
+    * Streamable HTTP (recommended)
+    * legacy SSE (deprecated)
 
-It automatically detects whether the server script is a Python source file
-(.py) or a packaged executable (.exe on Windows, or executable file on Unix)
-and generates appropriate command lines.
+The module is designed to be imported and called by mcp_server.py, but can
+also be used standalone from the command line.
 
-Optionally, it can generate a stdio configuration that uses mcp_proxy as an
-intermediary to log all communication (useful for debugging and integration
-verification).
+Project layout assumption
+-------------------------
+This project ships the proxy and the server side by side, mirroring their
+type:
 
-Generated stdio configurations automatically include `--log-file` to enable
-file logging. HTTP and SSE configurations rely on the `MCP_LOG_FILE` environment
-variable for file logging.
+    * Source mode:   mcp_server.py + mcp_proxy.py
+    * Packaged mode: mcp_server.exe + mcp_proxy.exe
+
+The generator therefore derives the proxy launch command from the *server
+type* (is_exe), not from the file extension of the proxy alone. This makes
+the two modes consistent:
+
+    * If server is a Python script:
+          command = python_exe
+          args    = [mcp_proxy.py, python_exe, mcp_server.py, ...]
+
+    * If server is a native executable:
+          command = mcp_proxy.exe
+          args    = [mcp_server.exe, ...]
+
+Generated stdio configurations always include `--log-file` so that the
+server writes a log next to the generated configs.
+
+CHANGELOG (v2.5)
+    * Removed unused `Dict` and `Any` imports from `typing`.
+    * Merged the parallel `agent_ids` list and `agent_names` dict into a
+      single `agents_meta` dict, so adding a new client only requires
+      editing one place.
+    * Removed a dead `proxy_cmd_example = None` assignment in the
+      non-proxy branch (the variable is only ever read when
+      `use_proxy` is True).
+
+CHANGELOG (v2.4)
+    * When proxy is NOT enabled, the "Manual Server Invocation" section
+      no longer prints an empty "via proxy" block with
+      "(proxy not available)". The enabling instructions already
+      appear under "Configuration Files".
+    * The proxy manual command is only constructed when proxy is
+      enabled.
+    * The `--output-dir` hint now uses the raw user-supplied path
+      instead of an absolute resolved path, so the printed command is
+      copy-paste ready.
 
 DEPENDENCIES
     - Python 3.7+
@@ -33,9 +68,37 @@ import json
 import argparse
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Optional
 
 
+# ============================================================================
+# Helper: build the command that the MCP client will actually execute.
+# ============================================================================
+def _build_launch_command(
+    program_path: str,
+    program_args: list,
+    is_exe: bool,
+    python_exe: str,
+):
+    """
+    Return (command, args) that a client should use to launch `program_path`.
+
+    If `is_exe` is True, the program is treated as a native executable:
+        command = program_path
+        args    = program_args
+
+    If `is_exe` is False, the program is treated as a Python script:
+        command = python_exe
+        args    = [program_path] + program_args
+    """
+    if is_exe:
+        return program_path, list(program_args)
+    return python_exe, [program_path] + list(program_args)
+
+
+# ============================================================================
+# Main config generation
+# ============================================================================
 def generate_configs(
     server_script_path: str,
     endpoint: str = "ipc:agent",
@@ -56,51 +119,51 @@ def generate_configs(
     Generate MCP client configuration files and Markdown docs.
 
     Args:
-        server_script_path: Path to mcp_server.py (or the executable)
-        endpoint: LingoFuse endpoint
-        timeout_ms: Call timeout in milliseconds
-        reg_agent_app: Registration agent app name
-        tool_provider_app: Tool provider app name
-        agent_main_api: API to fetch tool list
-        agent_log_api: API to send logs
-        debug: Enable debug mode
-        host: Host for HTTP transport
-        port: Port for HTTP transport
-        output_dir: Output directory for generated files
-        python_exe: Python executable path (defaults to sys.executable)
-        is_exe: Force treat server_script_path as executable (if None, auto-detect)
-        proxy_path: Path to mcp_proxy executable (if provided, generates proxy stdio configs)
+        server_script_path: Path to mcp_server.py (or the executable).
+        endpoint: LingoFuse endpoint.
+        timeout_ms: Call timeout in milliseconds.
+        reg_agent_app: Registration agent app name.
+        tool_provider_app: Tool provider app name.
+        agent_main_api: API used to fetch the tool list.
+        agent_log_api: API used to send logs.
+        debug: Enable debug mode.
+        host: Host for HTTP transport.
+        port: Port for HTTP transport.
+        output_dir: Output directory for generated files.
+        python_exe: Python executable (defaults to sys.executable).
+        is_exe: Force treat server_script_path as an executable. If None,
+                auto-detect based on the file extension.
+        proxy_path: Path to mcp_proxy (script or exe). If provided and valid,
+                    `_stdio_proxy.json` files will be generated.
     """
     if python_exe is None:
         python_exe = sys.executable
 
-    # Auto-detect if server_script_path is a Python script or an executable
+    # ----- Determine whether the server is a script or an exe -----
     if is_exe is None:
-        # Consider .py or .pyw files as scripts; everything else as executable
-        lower_path = server_script_path.lower()
-        if lower_path.endswith(('.py', '.pyw')):
-            is_exe = False
-        else:
-            is_exe = True
+        lower = server_script_path.lower()
+        is_exe = not lower.endswith(('.py', '.pyw'))
 
-    # Validate proxy_path if provided
+    # ----- Validate proxy path if provided -----
     use_proxy = False
     if proxy_path:
         proxy_path = os.path.abspath(proxy_path)
         if os.path.isfile(proxy_path):
             use_proxy = True
-            print(f"[Generator] Proxy executable found: {proxy_path}")
+            print(f"[Generator] Proxy file found: {proxy_path}")
         else:
-            print(f"[Generator] WARNING: proxy_path '{proxy_path}' does not exist. Proxy configs will be skipped.")
+            print(f"[Generator] WARNING: proxy_path '{proxy_path}' does not exist. "
+                  "Proxy configs will be skipped.")
 
+    # ----- Prepare output directory -----
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     print(f"[Generator] Output directory: {output_path.absolute()}")
 
-    # Absolute path for the log file, to ensure it is written in the config directory
+    # Absolute path for the server log file (placed next to the configs)
     log_file_path = str((output_path / "mcp_server.log").resolve())
 
-    # Build base command arguments (without --transport, --host, --port)
+    # ----- Base args common to all transports -----
     base_args = [
         "--endpoint", endpoint,
         "--timeout", str(timeout_ms),
@@ -112,138 +175,90 @@ def generate_configs(
     if debug:
         base_args.append("--debug")
 
-    # stdio configuration args (add transport and log-file)
     stdio_args = base_args + ["--transport", "stdio", "--log-file", log_file_path]
-    # HTTP configuration args (add transport, host, port)
-    http_args = base_args + ["--transport", "http", "--host", host, "--port", str(port)]
-    # Legacy SSE configuration args (still supported but deprecated)
-    sse_args = base_args + ["--transport", "sse", "--host", host, "--port", str(port)]
+    http_args  = base_args + ["--transport", "http", "--host", host, "--port", str(port)]
+    sse_args   = base_args + ["--transport", "sse",  "--host", host, "--port", str(port)]
 
-    # Environment variables (same for all)
+    # ----- Environment variables shared by all configs -----
     env_vars = {
         "LINGOFUSE_ENDPOINT": endpoint,
         "MCP_LOG_ENABLED": "true",
         "MCP_LOG_FILE": log_file_path,
     }
 
-    # Determine command and args for stdio (depending on script vs exe)
-    if is_exe:
-        # For executable: command is the executable itself, args are only the flags
-        stdio_command = server_script_path
-        stdio_args_full = stdio_args
-        http_command = server_script_path
-        http_args_full = http_args
-        sse_command = server_script_path
-        sse_args_full = sse_args
-    else:
-        # For Python script: command is python interpreter, first arg is script
-        stdio_command = python_exe
-        stdio_args_full = [server_script_path] + stdio_args
-        http_command = python_exe
-        http_args_full = [server_script_path] + http_args
-        sse_command = python_exe
-        sse_args_full = [server_script_path] + sse_args
+    # ----- Server launch command (direct stdio) -----
+    stdio_command, stdio_args_full = _build_launch_command(
+        server_script_path, stdio_args, is_exe, python_exe
+    )
+    http_command, http_args_full = _build_launch_command(
+        server_script_path, http_args, is_exe, python_exe
+    )
+    sse_command, sse_args_full = _build_launch_command(
+        server_script_path, sse_args, is_exe, python_exe
+    )
 
-    # If proxy is enabled, prepare proxy-specific command and args
+    # ----- Proxy launch command (optional) -----
+    #
+    # The proxy is a thin stdio wrapper that launches the real server as a
+    # child process and logs every byte exchanged. Its own launch command
+    # mirrors the server type, because the project ships them as a matched
+    # pair (mcp_server.py + mcp_proxy.py, or mcp_server.exe + mcp_proxy.exe).
+    #
+    proxy_stdio_command = None
+    proxy_stdio_args_full = None
     if use_proxy:
-        # For proxy: command is the proxy executable
-        # Args: server_script_path + stdio_args (the proxy passes these to the real server)
-        proxy_stdio_command = proxy_path
-        proxy_stdio_args_full = [server_script_path] + stdio_args
+        # The proxy receives the *full launch command of the real server* as
+        # its own arguments.
+        if is_exe:
+            child_cmd = [server_script_path] + stdio_args
+        else:
+            child_cmd = [python_exe, server_script_path] + stdio_args
+
+        # Determine how to launch the proxy itself.
+        proxy_lower = proxy_path.lower()
+        if proxy_lower.endswith(('.py', '.pyw')):
+            # Proxy is a Python script.
+            proxy_stdio_command = python_exe
+            proxy_stdio_args_full = [proxy_path] + child_cmd
+        else:
+            # Proxy is a native executable.
+            proxy_stdio_command = proxy_path
+            proxy_stdio_args_full = child_cmd
+
+        print(f"[Generator] Proxy launcher : {proxy_stdio_command}")
+        print(f"[Generator] Proxy args     : {proxy_stdio_args_full}")
         print("[Generator] Proxy stdio configs will be generated.")
+    else:
+        print("[Generator] Proxy stdio configs will NOT be generated "
+              "(no valid --proxy-path).")
 
-    # ----- Define agent templates -----
-    # The 'http' transport uses the official Streamable HTTP endpoint '/mcp'.
-    # The 'sse' endpoint '/sse' is deprecated but still supported for legacy clients.
-    agents = {
-        "lmstudio": {
-            "name": "LM Studio",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
-        "claude": {
-            "name": "Claude Desktop",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
-        "continue": {
-            "name": "Continue.dev",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
-        "jan": {
-            "name": "Jan AI",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
-        "deepseek": {
-            "name": "DeepSeek",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
-        "generic": {
-            "name": "Generic MCP Client",
-            "config_key": "mcpServers",
-            "server_key": "pascal-backend",
-            "stdio_command": stdio_command,
-            "stdio_args": stdio_args_full,
-            "http_command": http_command,
-            "http_args": http_args_full,
-            "sse_command": sse_command,
-            "sse_args": sse_args_full,
-            "http_url": f"http://{host}:{port}/mcp",
-            "sse_url": f"http://{host}:{port}/sse",
-        },
+    # ----- Agent templates -----
+    #
+    # All supported clients use the same "mcpServers" structure and the
+    # same HTTP/SSE URLs. Adding a new client only requires a new entry
+    # in this dict.
+    #
+    agents_meta = {
+        "lmstudio": "LM Studio",
+        "claude":   "Claude Desktop",
+        "continue": "Continue.dev",
+        "jan":      "Jan AI",
+        "deepseek": "DeepSeek",
+        "generic":  "Generic MCP Client",
     }
+    config_key = "mcpServers"
+    server_key = "pascal-backend"
+    http_url = f"http://{host}:{port}/mcp"
+    sse_url  = f"http://{host}:{port}/sse"
 
-    # Generate for each agent
-    for agent_id, agent in agents.items():
-        # ---- stdio config (direct) ----
+    # ----- Loop over agents and write every file -----
+    for agent_id, agent_name in agents_meta.items():
+        # ---- 1. stdio (direct) ----
         stdio_config = {
-            agent["config_key"]: {
-                agent["server_key"]: {
-                    "command": agent["stdio_command"],
-                    "args": agent["stdio_args"],
+            config_key: {
+                server_key: {
+                    "command": stdio_command,
+                    "args": stdio_args_full,
                     "env": env_vars,
                 }
             }
@@ -253,11 +268,12 @@ def generate_configs(
             json.dump(stdio_config, f, indent=2, ensure_ascii=False)
         print(f"[Generator] Wrote: {stdio_file}")
 
-        # ---- stdio config (via proxy) ----
+        # ---- 2. stdio (via proxy, optional) ----
+        proxy_stdio_config = None
         if use_proxy:
             proxy_stdio_config = {
-                agent["config_key"]: {
-                    agent["server_key"]: {
+                config_key: {
+                    server_key: {
                         "command": proxy_stdio_command,
                         "args": proxy_stdio_args_full,
                         "env": env_vars,
@@ -269,12 +285,11 @@ def generate_configs(
                 json.dump(proxy_stdio_config, f, indent=2, ensure_ascii=False)
             print(f"[Generator] Wrote: {proxy_stdio_file}")
 
-        # ---- HTTP (Streamable) config ----
-        # Uses the '/mcp' endpoint (official recommendation)
+        # ---- 3. HTTP (Streamable) ----
         http_config = {
-            agent["config_key"]: {
-                agent["server_key"]: {
-                    "url": agent["http_url"],
+            config_key: {
+                server_key: {
+                    "url": http_url,
                     "env": env_vars,
                 }
             }
@@ -284,12 +299,11 @@ def generate_configs(
             json.dump(http_config, f, indent=2, ensure_ascii=False)
         print(f"[Generator] Wrote: {http_file}")
 
-        # ---- Legacy SSE config (deprecated) ----
-        # Kept for backward compatibility; clients should migrate to '/mcp'
+        # ---- 4. SSE (legacy) ----
         sse_config = {
-            agent["config_key"]: {
-                agent["server_key"]: {
-                    "url": agent["sse_url"],
+            config_key: {
+                server_key: {
+                    "url": sse_url,
                     "env": env_vars,
                 }
             }
@@ -299,44 +313,94 @@ def generate_configs(
             json.dump(sse_config, f, indent=2, ensure_ascii=False)
         print(f"[Generator] Wrote: {sse_file}")
 
-        # ---- Markdown documentation ----
+        # ---- 5. Markdown documentation ----
         md_file = output_path / f"{agent_id}_README.md"
-        # Determine the invocation description based on script vs exe
+
+        # Human-readable server invocation
         if is_exe:
             server_invocation = f"`{server_script_path}` (executable)"
-            stdio_cmd_example = f"{server_script_path} --transport stdio --log-file {log_file_path}"
-            proxy_cmd_example = f"{proxy_path} {server_script_path} --transport stdio --log-file {log_file_path}" if use_proxy else "(proxy not available)"
-            http_cmd_example = f"{server_script_path} --transport http --host {host} --port {port}"
-            sse_cmd_example = f"{server_script_path} --transport sse --host {host} --port {port}"
+            expected_proxy_name = "mcp_proxy.exe"
         else:
-            server_invocation = f"`{python_exe} {server_script_path}` (Python script)"
-            stdio_cmd_example = f"{python_exe} {server_script_path} --transport stdio --log-file {log_file_path}"
-            proxy_cmd_example = f"{proxy_path} {python_exe} {server_script_path} --transport stdio --log-file {log_file_path}" if use_proxy else "(proxy not available)"
-            http_cmd_example = f"{python_exe} {server_script_path} --transport http --host {host} --port {port}"
-            sse_cmd_example = f"{python_exe} {server_script_path} --transport sse --host {host} --port {port}"
+            server_invocation = (
+                f"`{python_exe} {server_script_path}` (Python script)"
+            )
+            expected_proxy_name = "mcp_proxy.py"
 
-        # Build proxy section text if enabled
-        proxy_section = ""
+        # Manual invocation examples
+        stdio_cmd_example = " ".join([stdio_command] + stdio_args_full)
+        http_cmd_example  = " ".join([http_command]  + http_args_full)
+        sse_cmd_example   = " ".join([sse_command]   + sse_args_full)
+
+        # ---- Proxy section in "Configuration Files" ----
         if use_proxy:
+            proxy_cmd_example = " ".join(
+                [proxy_stdio_command] + proxy_stdio_args_full
+            )
             proxy_section = f"""
-- **`{agent_id}_stdio_proxy.json`**: Use this for stdio transport **with the proxy** (logs all communication via mcp_proxy).
-  The proxy command is `{proxy_path}` and it forwards to the real server.
+- **`{agent_id}_stdio_proxy.json`** — stdio transport **via mcp_proxy**.
+
+  This is the recommended configuration when you need to debug the MCP
+  handshake or tool calls. Every byte exchanged between the MCP client
+  and `mcp_server` is written to `proxy.log` (and also forwarded to the
+  MCP client's stderr, where it is typically captured in its logs).
+
+  The proxy is launched as:
+  ```
+  {proxy_cmd_example}
+  ```
 """
-
-        # Determine the proxy status text for the heading
-        proxy_heading_suffix = " (if proxy is enabled)" if use_proxy else " (not enabled)"
-
-        # Build the JSON display for proxy config (or placeholder)
-        if use_proxy:
-            proxy_json_display = json.dumps(proxy_stdio_config, indent=2, ensure_ascii=False)
+            proxy_heading_suffix = " (proxy enabled)"
+            proxy_json_display = json.dumps(
+                proxy_stdio_config, indent=2, ensure_ascii=False
+            )
             proxy_extra = f"```json\n{proxy_json_display}\n```"
+
+            # Extra paragraph in the "Manual Server Invocation" section
+            proxy_manual_section = f"""To start the server manually in stdio mode **via proxy**:
+
+```
+{proxy_cmd_example}
+```
+
+"""
         else:
-            proxy_extra = "*Proxy support is not enabled in this build.*"
+            proxy_section = f"""
+- **`{agent_id}_stdio_proxy.json`** — *not generated in this run*.
 
+  The proxy is an optional stdio wrapper that forwards every byte between
+  the MCP client and `mcp_server`, writing everything to `proxy.log` and
+  to stderr. It is very useful for debugging MCP handshakes or tool calls.
+
+  **To enable the proxy variant:**
+
+  1. Ensure `{expected_proxy_name}` exists in the same directory as the
+     server (next to `mcp_server.py` in source mode, or next to
+     `mcp_server.exe` in packaged mode).
+  2. Re-run the config generator, for example:
+     ```
+     python mcp_server.py --generate-configs --output-dir {output_dir}
+     ```
+     Or specify the proxy path explicitly:
+     ```
+     python mcp_server.py --generate-configs --proxy-path /path/to/{expected_proxy_name}
+     ```
+  3. A new `{agent_id}_stdio_proxy.json` file will appear in this directory.
+"""
+            proxy_heading_suffix = " (proxy not enabled)"
+            proxy_extra = (
+                "*Proxy config not generated because mcp_proxy was not found. "
+                "See the instructions above to enable it.*"
+            )
+
+            # No "via proxy" manual invocation block when proxy is absent.
+            proxy_manual_section = ""
+
+        # ---- Write the Markdown file ----
         with open(md_file, "w", encoding="utf-8") as f:
-            f.write(f"""# {agent['name']} MCP Configuration
+            f.write(f"""# {agent_name} — MCP Configuration
 
-This document explains how to configure **{agent['name']}** to use the **LingoFuse Backend MCP Server**.
+This document explains how to configure **{agent_name}** to use the
+**LingoFuse Backend MCP Server**.
 
 The server can be run as:
 - **{server_invocation}**
@@ -345,23 +409,22 @@ The server can be run as:
 
 The server supports three transport modes:
 
-1. **stdio** (default) – best for local clients.
+1. **stdio** (default) — best for local clients.
    - Two variants are provided: direct (default) and proxy (for debugging).
-2. **http** (recommended) – Streamable HTTP (official MCP standard) for remote/web clients.
-   - Uses endpoint: `{agent['http_url']}`
-3. **sse** (deprecated) – Legacy Server-Sent Events transport. Still supported but not recommended for new deployments.
-   - Uses endpoint: `{agent['sse_url']}`
+2. **http** (recommended) — Streamable HTTP (official MCP standard) for
+   remote or web clients.
+   - Uses endpoint: `{http_url}`
+3. **sse** (deprecated) — Legacy Server-Sent Events transport.
+   - Uses endpoint: `{sse_url}`
 
 ---
 
 ## Configuration Files
 
-Four JSON files are provided (three if proxy is not enabled):
-
-- **`{agent_id}_stdio.json`**: Use this for stdio transport (direct).
+- **`{agent_id}_stdio.json`** — stdio transport, direct.
 {proxy_section}
-- **`{agent_id}_http.json`**: Use this for Streamable HTTP (recommended).
-- **`{agent_id}_sse.json`**: Use this for legacy SSE (deprecated).
+- **`{agent_id}_http.json`** — Streamable HTTP (recommended).
+- **`{agent_id}_sse.json`** — legacy SSE (deprecated).
 
 ### stdio Configuration (Direct)
 
@@ -391,22 +454,30 @@ Four JSON files are provided (three if proxy is not enabled):
 
 ### For LM Studio / Claude Desktop / Jan / DeepSeek
 
-1. Locate your MCP configuration file (usually `~/.lmstudio/mcp.json` or similar).
-2. Merge the contents of the desired JSON file into the `"mcpServers"` section.
+1. Locate your MCP configuration file
+   (usually `~/.lmstudio/mcp.json` or similar).
+2. Merge the contents of the desired JSON file into the
+   `"mcpServers"` section.
 3. Restart the client.
 
-> **Note:** 
-> - If your client supports Streamable HTTP (recommended), use the `_http.json` file.
-> - If you need to debug or monitor the stdio communication, use the `_stdio_proxy.json` file (if available). This wraps the server with `mcp_proxy` which logs all messages to `proxy.log` and stderr.
+> **Note:**
+> - If your client supports Streamable HTTP (recommended), use the
+>   `_http.json` file.
+> - If you need to debug or monitor the stdio communication, use the
+>   `_stdio_proxy.json` file (if available). This wraps the server with
+>   `mcp_proxy`, which logs all messages to `proxy.log` and stderr.
 > - If you only need stdio without proxy, use `_stdio.json`.
 
 ### For Continue.dev
 
-Continue uses a similar `mcpServers` structure in its config. Merge accordingly.
+Continue uses a similar `mcpServers` structure in its config. Merge
+accordingly.
 
 ### For Generic MCP Clients
 
-Use the `generic_stdio.json`, `generic_stdio_proxy.json` (if available), `generic_http.json`, or `generic_sse.json` as a template and adapt to your client's expected format.
+Use the `generic_stdio.json`, `generic_stdio_proxy.json` (if available),
+`generic_http.json`, or `generic_sse.json` as a template and adapt to
+your client's expected format.
 
 ---
 
@@ -418,13 +489,7 @@ To start the server manually in stdio mode (direct):
 {stdio_cmd_example}
 ```
 
-To start the server manually in stdio mode **via proxy** (if proxy is available):
-
-```
-{proxy_cmd_example}
-```
-
-To start the server in Streamable HTTP mode (recommended for remote clients):
+{proxy_manual_section}To start the server in Streamable HTTP mode (recommended for remote clients):
 
 ```
 {http_cmd_example}
@@ -440,18 +505,26 @@ To start the server in legacy SSE mode (deprecated):
 
 - The **stdio** server will start automatically when the client launches.
 - The **HTTP** server must be started manually **before** the client connects.
-- The **SSE** server (deprecated) must also be started manually, but migration to HTTP is strongly encouraged.
-- The **proxy** stdio mode is useful for debugging – all JSON-RPC messages will be logged to `proxy.log` and stderr.
-- File logging is enabled by default for stdio configurations (via `--log-file`). For HTTP/SSE, file logging is controlled by the `MCP_LOG_FILE` environment variable.
-- Ensure the `LINGOFUSE_ENDPOINT` environment variable (or `--endpoint`) matches your LingoFuse backend.
+- The **SSE** server (deprecated) must also be started manually, but
+  migration to HTTP is strongly encouraged.
+- The **proxy** stdio mode is useful for debugging — all JSON-RPC messages
+  will be logged to `proxy.log` and stderr.
+- File logging is enabled by default for stdio configurations
+  (via `--log-file`). For HTTP/SSE, file logging is controlled by the
+  `MCP_LOG_FILE` environment variable.
+- Ensure the `LINGOFUSE_ENDPOINT` environment variable (or `--endpoint`)
+  matches your LingoFuse backend.
 
 ## Migration from SSE to HTTP
 
-If you were previously using SSE, update your configuration to use the `_http.json` file and change the URL from `/sse` to `/mcp`. Also update the server command to use `--transport http` instead of `--transport sse`.
+If you were previously using SSE, update your configuration to use the
+`_http.json` file and change the URL from `/sse` to `/mcp`. Also update
+the server command to use `--transport http` instead of `--transport sse`.
 
 ## Generated Files
 
-All configurations were generated on: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+All configurations were generated on:
+{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
 
 Server command: `{server_script_path if is_exe else python_exe + ' ' + server_script_path}`
 """)
@@ -461,10 +534,12 @@ Server command: `{server_script_path if is_exe else python_exe + ' ' + server_sc
 
 
 # ============================================================================
-# Command-line entry point (standalone)
+# Standalone CLI entry point
 # ============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="Generate MCP client configurations")
+    parser = argparse.ArgumentParser(
+        description="Generate MCP client configuration files and docs"
+    )
     parser.add_argument(
         "--server-script",
         required=True,
@@ -535,7 +610,8 @@ def main():
     parser.add_argument(
         "--proxy-path",
         default=None,
-        help="Path to mcp_proxy executable (if provided, generates stdio proxy configs)"
+        help="Path to mcp_proxy script or executable "
+             "(enables stdio proxy configs)"
     )
     args = parser.parse_args()
 
