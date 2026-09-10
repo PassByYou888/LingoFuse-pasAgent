@@ -120,10 +120,8 @@ Pascal 项目引用了以下单元库，需提前准备好并配置搜索路径�
 ### 3.4 编译命令示例（cmd）
 
 ```cmd
-fpc -Mdelphi -O2 -Fu..\ZCore -Fu..\ZJson -Fu..\ZHashList -Fu..\ZMemoryStream -Fu..\ZNet -Fu..\ZNet.C4 -FE. pascal_agent_service.lpr
+lazbuild pascal_agent_service.lpi
 ```
-
-若您没有源码，可联系团队获取预编译的单元（.ppu 或 .o 文件），但推荐使用源码以确保版本匹配。
 
 ---
 
