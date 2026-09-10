@@ -1,0 +1,186 @@
+# LingoFuse-pasAgent
+
+> LingoFuse-pasAgent is an industrial-grade Pascal AI agent toolchain that enables AI clients (Claude, LM Studio, Doubao, DeepSeek, etc.) to directly call Pascal functions as native tools via the Model Context Protocol (MCP). It provides a pre-built package for beginners to experience AI-powered Pascal code without setting up a development environment. The core mechanism is fully deterministic: your Pascal functions are parsed into structured JSON, normalized through a 5-layer transparent pipeline, and generated into MCP tool definitions — no LLM randomness, reproducible results, and zero debugging cost.
+>
+> LingoFuse-pasAgent 是工业级 Pascal 智能体技术体系，让 AI 客户端（Claude / LM Studio / 豆包 / DeepSeek 等）通过 MCP 协议直接调用你的 Pascal 函数。提供预编译包，新手无需配置开发环境即可体验。核心链路完全确定性——不依赖 LLM 随机性，结果可复现，零调试成本。
+
+## Key facts
+- Repository: https://github.com/PassByYou888/LingoFuse-pasAgent
+- License: MIT
+- Status: Active development (project started 2026)
+- Core mechanism: MCP (Model Context Protocol) + Pascal + LingoFuse RPC
+- Pre-built package: https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build
+- Quick start time: ~10 minutes with pre-built package
+- Runtime dependency: Visual Studio 2022 VC++ Redistributable (x86/x64)
+- Supported AI clients: Doubao, LM Studio, Claude, Continue.dev, Jan, DeepSeek, any MCP-compatible client
+- Fully offline capable: all components run locally
+- Works with any Pascal function: database, file, hardware, GUI
+- Related project: LingoFuse — https://github.com/PassByYou888/LingoFuse
+- Related project: zIPC — https://github.com/PassByYou888/zIPC
+
+## Core capabilities
+- Exposes Pascal functions as AI-callable tools via MCP protocol
+- No MCP protocol knowledge required — write Pascal, AI calls it
+- No JSON Schema writing required
+- No HTTP service setup required
+- 5-layer transparent code generation pipeline (source → declaration → JSON → model → tool unit)
+- Each layer is independently viewable, editable, exportable, and LLM-assistable
+- Main pipeline is fully deterministic — reproducible results, no LLM randomness
+- Pre-built DLLs available — download, extract, run
+- Supports all MCP clients: Doubao, LM Studio, Claude, Continue.dev, Jan, DeepSeek
+- Fully offline: local LLM streaming service included
+- UI-compatible: code generator reserves main-thread sync interface
+
+## How it works
+
+```mermaid
+flowchart LR
+    U["你写 Pascal 函数"] --> P["pascal_agent_service（信标）"]
+    P --> M["mcp_server（网关）"]
+    M -->|MCP 协议| AI["AI 客户端 LM Studio / Claude / 豆包"]
+    AI -->|调用工具| M
+    M -->|执行| P
+    P -.->|返回结果| M
+    M -.->|返回结果| AI
+```
+
+Your Pascal functions → translated by `mcp_server` → AI client sees standard tools → calls actually execute your Pascal code.
+
+## 5-layer transparent code generation pipeline
+
+```mermaid
+flowchart TB
+    L0["Layer 0 — 原始 Pascal 源码"] --> L1["Layer 1 — Pascal 声明体"]
+    L1 <-.->|双向| L2["Layer 2 — LV0 声明 JSON"]
+    L2 --> L3["Layer 3 — LV1 模型 JSON"]
+    L3 --> L4["Layer 4 — 工具提供者单元"]
+```
+
+| Layer | Content | Purpose |
+|---|---|---|
+| Layer 0 | Raw Pascal source | Your original code |
+| Layer 1 | Pascal declaration body | Extracted function signatures |
+| Layer 2 | LV0 declaration JSON | Structured declarations |
+| Layer 3 | LV1 model JSON | Normalized model |
+| Layer 4 | Tool provider unit | Generated MCP tool definitions |
+
+Each layer can be independently viewed, edited, exported, fed to LLM for assistance, or rolled back on error.
+
+## Component architecture
+
+| Component | Purpose | Target user |
+|---|---|---|
+| Pascal Agent Service | Register your Pascal functions as tools | Pascal developers |
+| MCP Protocol Gateway | Translate tools into MCP protocol | Service deployers |
+| Code Generator | Generate tool definitions from Pascal declarations | Developers during development |
+| LLM Streaming Service | Run local LLM, fully offline | Air-gapped users |
+
+## Project structure
+
+```
+src/
+├── Pascal 后端
+│   ├── pascal_agent_service.lpr
+│   ├── pascal_agent_api.lpr
+│   ├── lingofuse_helper.pas
+│   └── CreateHealthCheck/
+├── Python 网关
+│   ├── mcp_server.py
+│   ├── mcp_proxy.py
+│   ├── language_middleware.py
+│   └── generate_agent_json.py
+├── 代码生成器
+│   └── tools/pascal_decl_to_mcp.lpr
+├── LLM 服务
+│   └── llm-service/
+└── Python 核心绑定
+    └── lingofuse/
+```
+
+**Three files you need to care about**:
+- `pascal_agent_api.lpr` — arithmetic tool example, your project prototype
+- `pascal_agent_service.lpr` — the server source you need to modify
+- `lingofuse_helper.pas` — helper functions for writing tools
+
+## Quick start (3 steps)
+
+### Step 1: Write a Pascal function
+
+```pascal
+function Add(a, b: Integer): Integer;
+begin
+  Result := a + b;
+end;
+```
+
+### Step 2: Run the code generator
+
+```bash
+pascal_decl_to_mcp.exe --input your_functions.pas --output tools/
+```
+
+### Step 3: Compile and start
+
+```bash
+# Compile the generated tool unit
+fpc -Mdelphi tools/your_tools.pas
+
+# Start the MCP gateway
+python mcp_server.py
+```
+
+AI can now call your Pascal function. For the complete step-by-step guide, see [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md).
+
+### Pre-built package (no environment setup)
+
+1. Download [Pre-built Package](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
+2. Extract
+3. Follow [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md)
+4. Call your first Pascal tool from AI in 10 minutes
+
+### Clone
+
+```bash
+git clone --recursive https://github.com/PassByYou888/LingoFuse-pasAgent.git
+# If already cloned without --recursive:
+git submodule update --init --recursive
+```
+
+## Documentation map
+
+| Document | Description | Audience |
+|---|---|---|
+| [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md) | Beginner tutorial (step-by-step) | New users |
+| [pascal_code_rule.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/pascal_code_rule.md) | Pascal declaration specification | Developers |
+| [Build_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Build_Guide.md) | Compilation guide | Developers |
+| [Dependency_Installation_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Dependency_Installation_Guide.md) | Dependency installation | Developers |
+| [Qwen2.5-7B-Instruct-Q4_K_M.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Qwen2.5-7B-Instruct-Q4_K_M.md) | Model download | Deployers |
+| [LingoFuse_LLM_Service_guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_LLM_Service_guide.md) | LLM service CLI | Deployers |
+| [Local LLM Agent Handbook CPU First, GPU Optional.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Local%20LLM%20Agent%20Handbook%20CPU%20First%2C%20GPU%20Optional.md) | Agent principles handbook | Advanced |
+| [LingoFuse_MCP_Server_Implementation_Memo.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_MCP_Server_Implementation_Memo.md) | MCP server implementation memo | Advanced |
+| [LingoFuse_Python_Binding_Migration_Record.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_Python_Binding_Migration_Record.md) | Migration & work summary | Advanced |
+
+## FAQ
+
+| Question | Answer |
+|---|---|
+| Do I need to know MCP protocol? | **No** — just write Pascal |
+| Does it only support Doubao? | **No** — supports all MCP clients: Doubao / LM Studio / Claude / Continue.dev / Jan / DeepSeek |
+| Can it only do arithmetic? | **Any Pascal function** — database, file, hardware, GUI |
+| Does it need internet? | **No** — all components run locally |
+| Can my function operate UI? | **Yes** — generated code reserves main-thread sync interface |
+| Missing DLL and don't want to compile? | **Download the pre-built package** — extract and run |
+
+## Relation to LingoFuse
+
+pasAgent is a branch project of LingoFuse. LingoFuse provides the cross-language RPC mesh and service discovery infrastructure. pasAgent builds on top of it to expose Pascal functions as MCP tools for AI agents. Both are fully open, non-commercial, community-driven projects under MIT license.
+
+## Links
+- GitHub: https://github.com/PassByYou888/LingoFuse-pasAgent
+- Pre-built Package: https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build
+- LingoFuse (parent project): https://github.com/PassByYou888/LingoFuse
+- zIPC (IPC engine): https://github.com/PassByYou888/zIPC
+- README: https://github.com/PassByYou888/LingoFuse-pasAgent#readme
+
+## Keywords
+LingoFuse-pasAgent, pasAgent, Pascal AI agent, MCP server, Model Context Protocol, Pascal MCP, AI call Pascal, Pascal toolchain, deterministic code generation, 5-layer pipeline, Pascal function as tool, local LLM, offline AI, Doubao, LM Studio, Claude, DeepSeek, MIT license, LingoFuse, zIPC, AI 调用 Pascal, Pascal 智能体, MCP 协议网关, 代码生成器, 确定性链路, 本地大模型, 离线 AI, 工业级 Pascal
