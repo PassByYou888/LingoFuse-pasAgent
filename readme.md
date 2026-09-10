@@ -192,6 +192,14 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 > **新手提示**：预编译包已内置所需动态库，**无需单独安装**。
 
+### ⚠️ 首次运行缺少 DLL？别慌！
+
+如果第一次运行时提示找不到 `LingoFuse64.dll` / `z_ipc_64.dll` 等动态库，而你又**不想自己编译 LingoFuse**：
+
+👉 **直接去预编译包发布页找现成的**：[https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
+
+那里已经打包好了所有需要的动态库，**下载解压即用**，省去编译环境折腾。
+
 ---
 
 ## 🌟 关于开放性
@@ -214,6 +222,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 | 只能做加减乘除吗？ | **任何 Pascal 函数**：数据库、文件、硬件、GUI…… |
 | 需要联网吗？ | **不需要**，所有组件本地运行 |
 | 我的函数操作 UI 能接入吗？ | **能**，生成代码预留主线程同步接口 |
+| 缺 DLL 又不想编译？ | **去[预编译包发布页](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)下载，解压即用** |
 
 ---
 
