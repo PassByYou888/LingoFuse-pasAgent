@@ -18,6 +18,29 @@
 
 ---
 
+## 🔧 运行前准备：LingoFuse 动态库依赖
+
+**pasAgent 的所有组件（MCP Server、Pascal 后端、代码生成器）运行时都必须依赖 LingoFuse 动态库**（`LingoFuse64.dll` / `liblingofuse.so`）。
+
+- **获取动态库的方式**：
+  1. 从 **[LingoFuse 仓库](https://github.com/PassByYou888/LingoFuse)** 下载**预编译包**（Release 中提供）。
+  2. 或按 LingoFuse 仓库中的构建指南**自行一键编译**。
+
+- **最佳部署方法（推荐）**：
+  将 LingoFuse 仓库克隆到本地，然后把其动态库所在目录（例如 `Binary/`）**添加到系统 PATH**，让系统能够直接找到动态库：
+  ```bash
+  git clone --recursive https://github.com/PassByYou888/LingoFuse.git
+  # 然后将 LingoFuse/Binary 目录加入系统 PATH，例如在 Linux 下：
+  export PATH=/path/to/LingoFuse/Binary:$PATH
+  ```
+  这是最简洁的做法，**无需把 DLL 复制到每个项目目录**。
+
+- **关于新手体验**：
+  考虑到新手的快速切入，预编译包已内置所需动态库，**无需单独安装 LingoFuse 或走安装流程**。
+  对于希望获得源码环境的开发者，正规的 LingoFuse Python 绑定安装流程为：在 LingoFuse 仓库的 `Py` 目录执行 `pip install -e .` 完成装包。
+
+---
+
 ## 🎯 这是什么？
 
 **pasAgent** 是一套 **工业级 Pascal 智能体（Agent）技术体系**，它的核心使命是：**让你用 Pascal 写的代码，能被 AI 直接调用。**
@@ -28,7 +51,7 @@
 
 ## 🌟 关于本项目的开放性
 
-**[pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent)是[LingoFuse](https://github.com/PassByYou888/LingoFuse)的分支项目,[pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent)与[LingoFuse](https://github.com/PassByYou888/LingoFuse)都是完全开放、非商业性的开源项目。**
+**[pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent) 是 [LingoFuse](https://github.com/PassByYou888/LingoFuse) 的分支项目，两者均为完全开放、非商业性的开源项目。**
 
 - ✅ **永久免费**：MIT 许可证，任何个人、团队、企业均可自由使用，包括商业用途。
 - ✅ **无商业捆绑**：没有任何收费功能、付费订阅或商业版本。
