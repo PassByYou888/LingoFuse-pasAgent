@@ -1,37 +1,52 @@
 # Dependency_Installation_Guide.md
 
-## LingoFuse 项目依赖包安装指南
+## LingoFuse-pasAgent 项目依赖安装与编译指南
 
-本文档详细说明编译和运行 LingoFuse 各组件所需的依赖包安装步骤，涵盖 Python 环境、Pascal 编译环境以及运行时动态库。无论您是开发者准备从源码编译，还是最终用户准备运行已编译的 EXE，均可参考本指南。
+本文档详细说明编译和运行 **LingoFuse-pasAgent** 各组件所需的依赖包安装步骤，涵盖 Python 环境、Pascal 编译环境以及运行时动态库。无论您是开发者准备从源码编译，还是最终用户准备运行已编译的 EXE，均可参考本指南。
 
 ---
 
 ## 1. 概述
 
-LingoFuse 项目主要包含两类组件：
+本项目包含两类主要组件：
 
 - **Python 组件**（如 `mcp_server.py`、`bridge.py`、`llm_service.py` 等），依赖 Python 第三方包。
-- **Pascal 组件**（如 `pascal_agent_service.lpr`、`pascal_agent_api.lpr`），依赖 Free Pascal 编译器和外部单元库（ZCore、ZJson 等）。
+- **Pascal 组件**（如 `pascal_agent_service.lpr`、`pascal_agent_api.lpr`、`HealthCheck.lpr`），依赖 Free Pascal 编译器和 Lazarus IDE。
 
-所有组件均依赖 **LingoFuse 动态库**（`LingoFuse64.dll` 或 `liblingofuse.so`），该库由核心 C4 服务网格提供。
+**所有组件均依赖 LingoFuse 动态库**（`LingoFuse64.dll` / `liblingofuse.so`），该库由 LingoFuse 核心项目提供，不包含在本仓库中。
 
 ---
 
-## 2. Python 依赖安装
+## 2. 环境准备
 
-### 2.1 环境要求
+### 2.1 Python 环境
+
 - Python 3.7 及以上版本（推荐 3.10 ~ 3.12）
 - pip（Python 包管理工具）
 
-### 2.2 快速安装（使用 requirements.txt）
+### 2.2 Pascal 编译环境
 
-若项目根目录包含 `requirements.txt`，可直接执行：
+- **Free Pascal 3.2+**（必须）
+- **Lazarus IDE**（推荐，用于编译 Pascal 项目，且项目依赖 Lazarus 的 `.lpi` 文件）
+
+> **注意**：本项目中的 Pascal 项目使用 Lazarus 项目文件（`.lpi`），**强烈建议使用 `lazbuild` 或 Lazarus IDE 进行编译**，而不是直接调用 `fpc`。因为项目包含复杂的依赖路径和单元搜索路径，`lazbuild` 能自动读取并处理这些配置。
+
+---
+
+## 3. Python 依赖安装
+
+### 3.1 快速安装（使用 `requirements.txt`）
+
+在 `src/` 目录下执行：
 
 ```bash
+cd src
 pip install -r requirements.txt
 ```
 
-### 2.3 手动安装核心依赖
+`requirements.txt` 包含 MCP Server 和 HTTP 网关的基础依赖。
+
+### 3.2 手动安装核心依赖
 
 根据您要使用的组件，可能需要安装以下包：
 
@@ -45,7 +60,7 @@ pip install -r requirements.txt
 | `transformers` + `torch` | LLM 服务（替代后端） | 可选 |
 | `pyinstaller` | 打包工具（仅开发者需要） | 编译时必需 |
 
-### 2.4 具体安装命令
+### 3.3 安装命令示例
 
 ```bash
 # 基础 MCP Server 依赖
@@ -60,164 +75,162 @@ pip install llama-cpp-python
 # LLM 服务（使用 transformers + PyTorch，需 CUDA 支持时可安装 torch 的 CUDA 版本）
 pip install transformers torch
 
-# 打包工具（仅开发时）
+# 打包工具（仅编译 EXE 时）
 pip install pyinstaller
 
 # 测试工具（可选）
 pip install requests
 ```
 
-### 2.5 验证安装
+---
 
-运行以下命令检查核心包是否可导入：
+## 4. 获取 LingoFuse 动态库
+
+所有 EXE 和 Python 脚本运行时都需要 **LingoFuse 动态库**。该库不包含在本仓库中，需从 [LingoFuse 仓库](https://github.com/PassByYou888/LingoFuse) 获取。
+
+### 4.1 推荐部署方法：加入系统 PATH
+
+1. 克隆 LingoFuse 仓库（需 `--recursive` 拉取子模块）：
+
+```bash
+git clone --recursive https://github.com/PassByYou888/LingoFuse.git
+```
+
+2. 将 LingoFuse 的 `Binary` 目录（或放置动态库的目录）加入系统 `PATH`。
+
+   - **Windows**（PowerShell）：
+     ```powershell
+     $env:PATH = "D:\path\to\LingoFuse\Binary;$env:PATH"
+     ```
+     或者永久设置：系统属性 → 环境变量 → 编辑 `Path`。
+
+   - **Linux / macOS**：
+     ```bash
+     export PATH=/path/to/LingoFuse/Binary:$PATH
+     ```
+
+   这样系统就能直接找到 `LingoFuse64.dll` / `liblingofuse.so`，无需复制到每个项目目录。
+
+### 4.2 或者：将动态库复制到 EXE 同目录
+
+如果不想修改 PATH，可以将动态库复制到每个 EXE 所在目录（例如 `src` 下编译出的 `mcp_server.exe`、`pascal_agent_service.exe` 等）。
+
+---
+
+## 5. 编译指南
+
+### 5.1 Python 组件编译（生成 EXE）
+
+在 `src` 目录下，提供了 PowerShell 脚本用于打包 Python 组件：
+
+| 脚本 | 作用 | 说明 |
+|------|------|------|
+| `build_mcp_server.ps1` | 编译 `mcp_server.exe` | 打包 FastMCP、pydantic、lingofuse 等依赖 |
+| `build_bridge.ps1` | 编译 `bridge.exe` | 打包 Flask 和 lingofuse |
+| `build_llm_service.ps1` | 编译 `llm_service.exe` | 打包 llama_cpp / lingofuse（可针对不同后端生成多个版本） |
+
+**使用方法**（在 `src` 目录打开 PowerShell）：
+
+```powershell
+.\build_mcp_server.ps1
+```
+
+脚本会调用 PyInstaller 生成 `.exe` 文件，输出位于 `dist` 目录。
+
+> **注意**：编译前确保已安装 `pyinstaller` 和相应 Python 依赖（如 `fastmcp`、`pydantic`、`flask`、`llama-cpp-python` 等）。
+
+### 5.2 Pascal 组件编译
+
+**必须使用 Lazarus 或 `lazbuild`**，项目提供了一键脚本 `build_pascal_agent.bat`（在 `src` 目录）：
+
+```bat
+lazbuild.exe -B ./pascal_agent_service.lpi
+lazbuild.exe -B ./pascal_agent_api.lpi
+lazbuild.exe -B ./CreateHealthCheck/HealthCheck.lpi
+echo 所有项目编译完成。
+timeout /t 5 /nobreak >nul
+```
+
+运行方式（在 `src` 目录）：
+
+```cmd
+build_pascal_agent.bat
+```
+
+该脚本会编译：
+
+- `pascal_agent_service.exe`
+- `pascal_agent_api.exe`
+- `HealthCheck.exe`
+
+如果 Lazarus 未配置到 PATH，请用 Lazarus IDE 打开相应 `.lpi` 文件，点击“编译”即可。
+
+**为什么不推荐直接 `fpc` 编译？**
+
+- 项目依赖 Z 框架等大量外部单元，路径配置复杂，`lazbuild` 能正确读取 `.lpi` 中的搜索路径。
+- 直接调用 `fpc` 需要手动指定大量 `-Fu` 参数，极易出错。
+- 使用 `lazbuild` 可以确保与 Lazarus IDE 编译结果一致，减少兼容性问题。
+
+---
+
+## 6. 验证安装
+
+### 6.1 验证 Python 环境
 
 ```bash
 python -c "import fastmcp; import pydantic; print('OK')"
 ```
 
-若输出 `OK` 则基础环境准备就绪。
+### 6.2 验证 Pascal 编译环境
 
----
-
-## 3. Pascal 编译环境依赖
-
-### 3.1 Free Pascal 编译器
-
-- **下载**：访问 [Free Pascal 官网](https://www.freepascal.org/download.html) 下载对应操作系统的安装包（Windows 推荐 64 位）。
-- **安装**：默认安装即可，记下安装路径（如 `C:\fpc\3.2.2`）。
-- **环境变量**：将 `fpc.exe` 所在目录（如 `C:\fpc\3.2.2\bin\x86_64-win64`）添加到系统 `PATH`。
-
-验证安装：
-
-```cmd
-fpc -v
-```
-
-### 3.2 Lazarus IDE（可选但推荐）
-
-若您使用 Lazarus 打开 `.lpi` 项目文件，需安装 Lazarus：
-
-- **下载**：[Lazarus 官网](https://www.lazarus-ide.org/)
-- **安装**：选择与 FPC 匹配的版本，安装时通常会自动配置 FPC 路径。
-
-### 3.3 外部 Pascal 单元库（ZCore、ZJson 等）
-
-Pascal 项目引用了以下单元库，需提前准备好并配置搜索路径：
-
-- **Z.Core**：基础线程、容器、时间等核心库。
-- **Z.PascalStrings** / **Z.UPascalStrings**：字符串处理。
-- **Z.Json**：JSON 解析（`TZ_JsonObject` 等）。
-- **Z.Status**：全局日志。
-- **Z.UnicodeMixedLib**：Unicode 工具。
-- **Z.HashList.Templet**：哈希表容器。
-- **Z.MemoryStream**：内存流。
-- 以及 **Z.Net.C4**、**Z.Net.DoubleTunnelIO.NoAuth** 等网络库。
-
-这些库通常以源代码形式存在于 `..\ZCore`、`..\ZJson` 等上级目录中。如果您尚未下载，需从 LingoFuse 项目仓库中获取完整的 Z 框架源码，或将源码目录放在正确位置（通常与 `src` 同级）。
-
-在 Lazarus 中，可通过“项目选项”→“编译器选项”→“其他单元文件”添加这些库的路径。在命令行编译时，使用 `-Fu` 参数指定路径（参见 `build_pascal_agent.bat`）。
-
-### 3.4 编译命令示例（cmd）
-
-```cmd
-lazbuild pascal_agent_service.lpi
-```
-
----
-
-## 4. LingoFuse 动态库
-
-所有组件运行时都需要 `LingoFuse64.dll`（Windows）或 `liblingofuse.so`（Linux）。该库由 LingoFuse 核心项目编译生成，不包含在 Python 或 Pascal 源码中。
-
-- **获取**：从 LingoFuse 发布版本中下载，或自行编译 C4 服务网格。
-- **放置**：将动态库放置在 EXE 同目录下，或系统 `PATH` 中。
-
-验证动态库是否存在且可加载：运行任何 LingoFuse 程序（如 `HealthCheck.exe`）或 Python 脚本，若报“Failed to load”则说明动态库未找到。
-
----
-
-## 5. LLM 服务额外依赖（可选）
-
-若您使用 `llm_service_*.exe` 或对应的 Python 脚本，需额外安装：
-
-- **llama-cpp-python**：用于本地 GGUF 模型推理。
-- **transformers + torch**：若使用 Hugging Face 模型（性能较低，不推荐生产）。
-
-安装命令：
+编译成功 `pascal_agent_service.exe` 后，运行：
 
 ```bash
-# CPU 版本
-pip install llama-cpp-python
-
-# 带 GPU 加速（CUDA 11.8）
-pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu118
-
-# 或使用 transformers + torch（需 CUDA 支持）
-pip install transformers torch --index-url https://download.pytorch.org/whl/cu118
+pascal_agent_service.exe
 ```
 
-确保您的系统有足够的显存（若使用 GPU）。
+若能看到 `[MAIN] Service is running...` 则说明环境配置正确。
 
----
+### 6.3 验证 LingoFuse 动态库
 
-## 6. 验证全部依赖
-
-### 6.1 Python 环境验证
-
-创建测试文件 `test_imports.py`：
-
-```python
-import fastmcp
-import pydantic
-import flask   # 如果 bridge 需要
-import llama_cpp  # 若使用 LLM
-print("All imports OK")
-```
-
-运行：
-
-```bash
-python test_imports.py
-```
-
-### 6.2 Pascal 编译验证
-
-尝试编译一个简单项目（如 `pascal_agent_service.lpr`），若成功生成 EXE，则环境配置正确。
-
-### 6.3 运行时验证
-
-运行 `mcp_server.exe --help` 或 `pascal_agent_service.exe` 检查是否能正常启动，确保动态库被正确加载。
+运行任何生成的 EXE 或 Python 脚本，若提示 `Failed to load LingoFuse64.dll`，则说明动态库未找到，请检查 PATH 或复制动态库。
 
 ---
 
 ## 7. 常见问题
 
 ### Q1: pip 安装失败（网络问题）
+
 - 使用国内镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple 包名`
 - 或使用代理。
 
-### Q2: fpc 找不到单元文件
-- 检查 `-Fu` 路径是否正确，路径分隔符在 Windows 下可用 `\` 或 `/`。
-- 确保单元文件（`.ppu`）与当前 FPC 版本兼容。
+### Q2: 运行 EXE 提示“缺少 DLL”
 
-### Q3: 运行 EXE 提示“缺少 DLL”
-- 将 `LingoFuse64.dll` 复制到 EXE 目录，或将其路径添加到系统 `PATH`。
-- 可使用 `Dependency Walker` 检查缺失的依赖。
+- 将 `LingoFuse64.dll`（或 `liblingofuse.so`）复制到 EXE 目录，或将其所在目录添加到系统 `PATH`。
+- 确保动态库与 EXE 架构一致（64 位 vs 32 位）。
 
-### Q4: 打包的 EXE 体积过大
-- 使用 UPX 压缩（需下载 UPX 并配置 PyInstaller 的 `--upx-dir`）。
-- 对于 Python EXE，可考虑使用 `--onefile` 虽会增大解压开销，但便于分发。
+### Q3: 编译 Pascal 项目时提示“找不到单元”
+
+- 确保已正确配置 Lazarus 的项目搜索路径（`.lpi` 文件中已定义）。
+- 若使用 `build_pascal_agent.bat`，请确认 `lazbuild.exe` 在 PATH 中，或使用绝对路径调用。
+
+### Q4: PyInstaller 打包后运行报 `ModuleNotFoundError`
+
+- 可能需要增加 `--hidden-import` 参数，例如 `--hidden-import language_middleware`。
+- 确保 `lingofuse` 包被包含在 `--add-data` 中（参考脚本）。
 
 ---
 
 ## 8. 总结
 
-本指南涵盖了从零搭建 LingoFuse 开发/运行环境所需的所有依赖安装步骤。若您仅作为最终用户运行已编译的 EXE，通常只需关注 **LingoFuse 动态库** 的放置即可。若您需要修改或重新编译源码，请按照上述步骤安装完整的 Python 包和 Pascal 环境。
+- **依赖**：所有组件需 LingoFuse 动态库，推荐通过克隆 LingoFuse 仓库并添加 PATH 来部署。
+- **Python 编译**：使用 `src` 下的 `*.ps1` 脚本（PyInstaller）。
+- **Pascal 编译**：使用 `build_pascal_agent.bat`（基于 `lazbuild`），**不建议直接使用 `fpc`**。
 
 如有任何未覆盖的问题，请参考项目文档或联系开发团队。
 
 ---
 
-**文档版本**：V1.0  
-**最后更新**：2026-09-09  
-**维护者**：LingoFuse 团队
+**文档版本**：V2.0  
+**最后更新**：2026-09-10  
+**维护者**：LingoFuse-pasAgent 团队
