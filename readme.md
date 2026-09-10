@@ -206,7 +206,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 - [VC++ Redistributable for Visual Studio 2022 (x86/x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
 
-  ---
+---
 
   ## 🌟 关于开放性
 
@@ -216,7 +216,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
   - ✅ **社区驱动**：决策来自社区贡献者
   - ✅ **透明开发**：源码全公开，构建可复现
 
-  ---
+---
 
   ## ❓ 常见问题
 
