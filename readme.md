@@ -12,9 +12,7 @@
 >
 > 👉 **[下载预编译包（Pre-built Package）](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)**
 >
-> 解压 → 按 **[mcp_api_tool_DOUBAO_GUIDE.md](mcp_api_tool_DOUBAO_GUIDE.md)** 操作 → **10 分钟让 AI 调用你的第一个 Pascal 工具**。
->
-> 该指南已包含完整的 LLM 服务启动步骤。若想先理解整体闭环，请继续往下读。
+> 解压 → 按 **[mcp_api_tool_doubao_guide.md](mcp_api_tool_doubao_guide.md)** 操作 → **10 分钟让 AI 调用你的第一个 Pascal 工具**。
 
 ---
 
@@ -26,188 +24,176 @@
 
 ---
 
-## 🏗️ 完整闭环：从 Pascal 函数到 AI 调用
+## 🛡️ 稳定性：为长时间运行而设计
 
-pasAgent 主链路有三段，**工具执行的位置**有两种方案（路径 A / 路径 B）。下面按**数据流**拆开画，避免一张图过载。
+pasAgent 的所有组件都针对**长时运行、高频调用**做了专门加固：
 
-### 图 1：三段主链路
+| 加固项 | 说明 |
+|--------|------|
+| **单 worker 串行化** | LLM 推理严格串行，避免 llama.cpp 的 KV cache 竞争崩溃 |
+| **会话双条件回收** | 只有「空闲超时 **且** 客户端离线」才回收，避免误杀正在使用的会话 |
+| **句柄自动回收** | 数据句柄闲置 5 分钟自动释放，7×24 小时不重启也不泄漏 |
+| **Watchdog 全程守护** | 后台线程定期巡检，单次失败不影响下一轮 |
+| **异常隔离** | 每个回调、每个后台循环都有 try/except 包裹，单点异常不扩散 |
+| **FIFO 队列** | 请求统一入队，天然背压，防止雪崩 |
+| **心跳与断线重连** | 客户端断开自动感知，客户端重连无需服务端干预 |
+| **能力矩阵自描述** | 客户端可查询服务端能力，不依赖硬编码假设 |
+
+**实测表现**：可稳定处理**数万条**连续的交互命令或 function call，长时间运行不掉线、不漏句柄、不串会话。
+
+---
+
+## 🎯 你想干什么？（按目的选择）
+
+pasAgent 有 11 个可执行文件，但**大多数用户只需要其中 2~3 个**。按你的目的选择：
+
+### 目的 1：只想和 AI 对话（不需要工具）
+
+**用 `llm_proxy.exe`** —— 转发到 LM Studio / Ollama / 云 API，你和 AI 正常聊天。
 
 ```mermaid
 flowchart LR
-    A["📄 Pascal 源码"] --> B["⚙️ code_decl_to_mcp<br/>（代码生成器）"]
-    B --> C["📦 工具提供者单元.pas"]
-    C --> D["🔨 lazbuild"]
-    D --> E["🎯 工具提供者 EXE"]
+    A["🖥️ 你的程序<br/>llm_test / 自研客户端"] -->|"LingoFuse RPC"| B["🟣 llm_proxy.exe"]
+    B -->|"HTTP SSE"| C["🔌 LM Studio / DeepSeek / ..."]
 
-    E --> F["📡 信标<br/>pascal_agent_service"]
-    F --> G["🤖 AI 客户端"]
-    G -.->|"看到工具"| F
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:4px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
+
+### 目的 2：想让 AI 调用你的 Pascal 工具（推荐）
+
+**用 `llm_proxy_tool.exe`（LTB）** —— 在对话基础上，**服务端自动帮 AI 调用你的 Pascal 工具**。你的客户端**不需要懂 MCP**，只发一条 `generate` 就行。
+
+```mermaid
+flowchart LR
+    A["🖥️ 你的程序<br/>llm_client / 自研客户端"] -->|"只发 generate"| B["🔴 llm_proxy_tool.exe<br/>LTB"]
+    B <-->|"HTTP SSE<br/>携带 tools"| C["🔌 LM Studio / DeepSeek / ..."]
+    B -->|"内部自动循环"| D["📡 信标"]
+    D --> E["🎯 Pascal 工具"]
+    B -.->|"chunk / think / finish"| A
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#922B21,stroke:#5A1A14,stroke-width:4px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+```
+
+### 目的 3：不联网，本地跑模型
+
+**用 `llm_service.exe`** —— 加载 GGUF 模型，完全离线。
+
+```mermaid
+flowchart LR
+    A["🖥️ 你的程序"] -->|"LingoFuse RPC"| B["🟢 llm_service.exe"]
+    B -->|"加载"| C["📦 NVIDIA-Nemotron-3.5-...gguf"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+    style C fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+```
+
+### 目的 4：客户端原生支持 MCP（经典路径）
+
+**用 `mcp_api_tool.exe`** —— 把 Pascal 工具翻译成 MCP 协议，给 LM Studio / Claude Desktop / Continue.dev 这类**自带 MCP 支持**的客户端使用。
+
+```mermaid
+flowchart LR
+    A["🤖 LM Studio / Claude Desktop<br/>（自己会调工具）"] -->|"MCP 协议"| B["🌉 mcp_api_tool.exe"]
+    B -->|"LF_Call"| C["📡 信标"]
+    C --> D["🎯 Pascal 工具"]
+
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+    style C fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+```
+
+---
+
+## 🗺️ 一图看懂组网
+
+**所有目的共用同一个信标**（`pascal_agent_service.exe`），只是入口程序不同。
+
+```mermaid
+flowchart TB
+    subgraph Users["👤 你的目的"]
+        U1["只对话"]
+        U2["想让 AI 用工具"]
+        U3["想离线跑模型"]
+        U4["客户端原生支持 MCP"]
+    end
+
+    subgraph Entrances["🚪 入口程序（按目的选）"]
+        E1["🟣 llm_proxy.exe<br/>纯文本转发"]
+        E2["🔴 llm_proxy_tool.exe<br/>转发 + 代管工具"]
+        E3["🟢 llm_service.exe<br/>本地推理"]
+        E4["🌉 mcp_api_tool.exe<br/>MCP 协议网关"]
+    end
+
+    subgraph Beacon["📡 公共基础设施"]
+        B["pascal_agent_service.exe<br/>信标 ipc:agent"]
+    end
+
+    subgraph Tools["🎯 你的 Pascal 工具"]
+        T["pascal_agent_api.exe<br/>或你自己的工具提供者"]
+    end
+
+    subgraph Backends["🔌 后端（按目的选）"]
+        R1["LM Studio / Ollama / 云 API"]
+        R2["📦 本地 GGUF 模型"]
+    end
+
+    U1 --> E1
+    U2 --> E2
+    U3 --> E3
+    U4 --> E4
+
+    E1 -.-> R1
+    E2 --> B
+    E2 -.-> R1
+    E3 -.-> R2
+    E4 --> B
+
+    B --> T
+
+    style Users fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style Entrances fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style Beacon fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style Tools fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Backends fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+```
+
+**三种 LLM 服务端（`llm_proxy` / `llm_proxy_tool` / `llm_service`）默认共用同一端点 `ipc:llm_service`，同一时刻只能运行一个。** 要同时跑多个，必须给每个指定不同的 `--endpoint` + `--app-name`。
+
+**`mcp_api_tool` 与 `llm_proxy_tool` 可以同时运行**（它们注册到信标的名字不同），一个走路径 A、一个走路径 B。
+
+---
+
+## 🚀 快速上手
+
+### 场景 A：新手最快路径（下载预编译包）
+
+```mermaid
+flowchart LR
+    A["1️⃣ 下载预编译包"] --> B["2️⃣ 解压到<br/>C:\Temp\temp2"]
+    B --> C["3️⃣ 按 DOUBAO 指南操作"]
+    C --> D["🎉 10 分钟<br/>AI 调用 Pascal 工具"]
 
     style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
-    style D fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
-    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
-    style F fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
-    style G fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style D fill:#922B21,stroke:#5A1A14,stroke-width:4px,color:#FFFFFF
 ```
 
-### 图 2：路径 A（客户端侧工具执行）—— 经典 MCP 闭环
-
-适用：**AI 客户端本身支持 MCP 协议**（LM Studio、Claude Desktop、Continue.dev、Jan、DeepSeek Chat 等）。
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant C as AI 客户端（支持 MCP）
-    participant M as mcp_api_tool<br/>（MCP 网关）
-    participant B as 信标
-    participant T as Pascal 工具
-
-    U->>C: 提问
-    C->>M: MCP: list_tools
-    M->>B: agent_main
-    B-->>M: 工具列表
-    M-->>C: 返回工具定义
-    C->>C: LLM 决定调用 add(5,7)
-    C->>M: MCP: call_tool("add", {a:5,b:7})
-    M->>B: LF_Call
-    B->>T: 路由到工具 App
-    T-->>B: {"result": 12}
-    B-->>M: 结果
-    M-->>C: 结果
-    C-->>U: 显示答案
-```
-
-**要点**：
-- 工具执行由 **AI 客户端发起**（客户端看到 MCP 工具列表，自己决定调哪个）。
-- `mcp_api_tool` 只做 MCP ↔ LingoFuse 的翻译。
-- LLM 推理可以由 AI 客户端自己负责（LM Studio 自带），也可以由 `llm_service` / `llm_proxy` 提供。
-
-### 图 3：路径 B（服务端侧工具执行）—— LTB 闭环
-
-适用：**AI 客户端不支持 MCP 工具**（部分 Pascal GUI 客户端、纯文本前端），或**希望服务端统一管理工具调用循环**的场景。
-
-```mermaid
-sequenceDiagram
-    participant U as 用户
-    participant C as AI 客户端（不感知工具）
-    participant L as llm_proxy_tool<br/>（LTB 服务端）
-    participant R as 后端 OpenAI API<br/>（LM Studio / DeepSeek / ...）
-    participant B as 信标
-    participant T as Pascal 工具
-
-    U->>C: 提问
-    C->>L: generate(content="5+7 等于几")
-    L->>R: POST /v1/chat/completions<br/>携带 tools=[...]
-    R-->>L: tool_calls: add(5,7)
-    L->>B: language_middleware.call_tool
-    B->>T: 执行 add(5,7)
-    T-->>B: {"result": 12}
-    B-->>L: 结果
-    L->>R: role=tool, content={"result": 12}
-    R-->>L: 最终文本 "...12..."
-    L-->>C: 流式 chunk / think / finish
-    C-->>U: 显示答案
-```
-
-**要点**：
-- AI 客户端**完全不知道工具体系的存在**——它只调 `generate`，收到 `chunk`/`think`/`finish` 流。
-- 工具发现和执行**全在 LTB 内部**完成。
-- 后端 OpenAI API 只需要能返回标准的 `tool_calls`。
-
-### 图 4：两条路径共存
-
-```mermaid
-flowchart TB
-    subgraph Beacon["📡 信标 ipc:agent"]
-        B1["pascal_agent_service.exe"]
-    end
-
-    subgraph ToolProviders["🎯 工具提供者"]
-        T1["pascal_agent_api.exe"]
-        T2["你的工具提供者"]
-    end
-
-    subgraph ClientsA["路径 A 客户端"]
-        A1["LM Studio / Claude Desktop"]
-        A2["mcp_api_tool.exe<br/>reg_agent = 'reg_agent'"]
-    end
-
-    subgraph ClientsB["路径 B 客户端"]
-        B1c["不支持 MCP 的客户端"]
-        B2c["llm_proxy_tool.exe<br/>reg_agent = 'llm_proxy_agent'"]
-    end
-
-    A1 -->|MCP| A2
-    A2 -->|LF_Call| B1
-    B1c -->|LF generate| B2c
-    B2c -->|LF_Call| B1
-    B1 -.->|注册| T1
-    B1 -.->|注册| T2
-
-    style Beacon fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
-    style ToolProviders fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
-    style ClientsA fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
-    style ClientsB fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
-```
-
-**共存关键**：`mcp_api_tool` 用 `--reg-agent-app reg_agent`；`llm_proxy_tool` 用 `--mcp-reg-agent-app llm_proxy_agent`。二者注册名不同，可同时运行，共享同一信标。
-
-### 图 5：三种 LLM 服务端（同一时刻只运行一个）
-
-```mermaid
-flowchart LR
-    subgraph S1["🟢 llm_service.exe"]
-        direction TB
-        S1a["本地加载 GGUF 模型"]
-        S1b["有状态（KV cache）"]
-        S1c["支持 set_system_message"]
-        S1d["工具执行：由客户端负责"]
-    end
-
-    subgraph S2["🟣 llm_proxy.exe"]
-        direction TB
-        S2a["不加载模型，纯转发"]
-        S2b["无状态（每轮重建 messages）"]
-        S2c["不支持 set_system_message"]
-        S2d["工具执行：由客户端负责"]
-    end
-
-    subgraph S3["🔴 llm_proxy_tool.exe（LTB）"]
-        direction TB
-        S3a["不加载模型，转发+代管工具"]
-        S3b["无状态（每轮重建 messages）"]
-        S3c["不支持 set_system_message"]
-        S3d["工具执行：服务端全权代理"]
-    end
-
-    style S1 fill:#D5F5E3,stroke:#1E8449,stroke-width:3px,color:#0E4D2A
-    style S2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:3px,color:#321640
-    style S3 fill:#FADBD8,stroke:#922B21,stroke-width:3px,color:#5A1A14
-```
-
-**三者默认都占用 `ipc:llm_service` / `LLM_Service`，同时只能运行一个**；要共存必须改 `--endpoint` + `--app-name`。
-
-**如何选**：
-
-| 你的情况 | 用哪个 |
-|----------|--------|
-| 想在本地跑模型（有 GGUF 文件） | `llm_service.exe` |
-| 已有 LM Studio / Ollama / 云 API，只想转发 | `llm_proxy.exe` |
-| 客户端不支持 MCP 工具，或希望工具调用由服务端统一管理 | `llm_proxy_tool.exe`（LTB） |
-
-**核心机制**：你写的 Pascal 函数 → 通过 `code_decl_to_mcp` 生成工具提供者 → 注册到信标 → AI 客户端（路径 A 通过 `mcp_api_tool`，或路径 B 通过 `llm_proxy_tool`）看到工具 → **实际执行你的 Pascal 代码**。
-
----
-
-## 🚀 四步上手
+### 场景 B：开发自己的 Pascal 工具
 
 ```mermaid
 flowchart TB
     S1["① 写 Pascal 函数"]
     S2["② 用 code_decl_to_mcp<br/>生成工具提供者"]
-    S3["③ 编译并启动<br/>信标 + 工具提供者"]
+    S3["③ lazbuild 编译<br/>+ 启动信标 + 工具提供者"]
     S4["④ 二选一：<br/>路径 A 挂 mcp_api_tool<br/>路径 B 挂 llm_proxy_tool"]
     S5["🎉 AI 调用你的工具"]
 
@@ -220,8 +206,6 @@ flowchart TB
     style S5 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-**完整图文教程**：[mcp_api_tool_DOUBAO_GUIDE.md](mcp_api_tool_DOUBAO_GUIDE.md)
-
 ---
 
 ## 🧩 代码生成器 5 层透明链
@@ -229,7 +213,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     L0["Layer 0<br/>原始源码<br/>Pascal / C"] --> L1["Layer 1<br/>声明体"]
-    L1 --> L2["Layer 2 — LV0<br/>底层 JSON"]
+    L1 <-->|双向| L2["Layer 2 — LV0<br/>底层 JSON"]
     L2 --> L3["Layer 3 — LV1<br/>规范化模型"]
     L3 --> L4["Layer 4<br/>工具提供者单元.pas"]
 
@@ -240,102 +224,30 @@ flowchart LR
     style L4 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-**每一层都可以**：独立查看 · 编辑 · 导出 · 喂给 LLM 辅助修正 · 出错时回退重走。  
-**主链路完全确定性**——不依赖 LLM 随机性，结果可复现。
+每一层可独立查看 · 编辑 · 导出 · 喂给 LLM 修正 · 回退重走。**主链路完全确定性**，不依赖 LLM 随机性。
 
-详细说明：[code_generate_mcp.md](code_generate_mcp.md)
+详细说明：[code_generate_mcp.md](code_generate_mcp.md)  
+声明规范：[pascal_code_mcp_rule.md](pascal_code_mcp_rule.md) · [C_code_mcp_rule.md](C_code_mcp_rule.md)
 
-输入输出规范（解析契约）：
-- Pascal 声明规范：[pascal_code_mcp_rule.md](pascal_code_mcp_rule.md)
-- C 声明规范：[C_code_mcp_rule.md](C_code_mcp_rule.md)
-
-> **注意**：代码生成器 `code_decl_to_mcp.exe` 的**源码不在本仓库中**，本仓库仅提供使用手册与声明规范。请从项目的预编译发布页获取可执行文件。
-
----
-
-## 🌟 LLM 生态体系（三种服务端 + 多客户端）
-
-pasAgent 闭环中 **"AI 的大脑"** 由 LLM 生态体系提供。它由**三种兄弟服务端**、**多种客户端**、**完整的协议与能力发现机制**组成。
-
-### 图 6：LLM 生态全景
-
-```mermaid
-flowchart TB
-    subgraph CLIENTS["🖥️ 客户端"]
-        C1["🐍 llm_test.exe"]
-        C2["🅿️ Pascal GUI 客户端"]
-        C3["🌍 其他 LingoFuse 客户端"]
-    end
-
-    subgraph SERVERS["🎯 三种服务端（同时只运行一个）"]
-        S1["🟢 llm_service.exe<br/>本地推理"]
-        S2["🟣 llm_proxy.exe<br/>纯转发"]
-        S3["🔴 llm_proxy_tool.exe<br/>转发 + 服务端工具执行"]
-    end
-
-    subgraph BACKENDS["🔌 后端生态"]
-        B1["📦 GGUF 模型"]
-        B2["LM Studio / Ollama"]
-        B3["DeepSeek / OpenRouter / ..."]
-    end
-
-    C1 --> S1
-    C1 --> S2
-    C1 --> S3
-    C2 --> S1
-    C2 --> S2
-    C2 --> S3
-    C3 --> S1
-    C3 --> S2
-    C3 --> S3
-    S1 --> B1
-    S2 --> B2
-    S2 --> B3
-    S3 --> B2
-    S3 --> B3
-
-    style CLIENTS fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
-    style SERVERS fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
-    style BACKENDS fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
-    style S1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
-    style S2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
-    style S3 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
-```
-
-### 📚 LLM 生态文档索引
-
-> **所有 LLM 相关文档都在 [`src/`](src/) 目录下。**
-
-| 文档 | 说明 | 适合谁 |
-|------|------|--------|
-| 🌐 **[LingoFuse_LLM_Ecosystem_User_Guide.md](src/LingoFuse_LLM_Ecosystem_User_Guide.md)** | **闭环架构与生态总览**（入口文档） | 想理解全貌的人 |
-| ⚙️ **[LingoFuse_LLM_Service_CLI_guide.md](src/LingoFuse_LLM_Service_CLI_guide.md)** | `llm_service.exe` 命令行完整手册 | 部署本地推理的人 |
-| ⚙️ **[LingoFuse_LLM_Proxy_CLI_Guide.md](src/LingoFuse_LLM_Proxy_CLI_Guide.md)** | `llm_proxy.exe` 命令行完整手册 | 转发到外部后端的人 |
-| 📋 **[LingoFuse_LLM_Proxy_Compatibility_Guide.md](src/LingoFuse_LLM_Proxy_Compatibility_Guide.md)** | 支持的 129+ OpenAI 兼容后端清单（LTB 同样适用） | 想知道能接什么的人 |
-| 🚨 **[LingoFuse_LLM_Pitfalls_For_AI.md](src/LingoFuse_LLM_Pitfalls_For_AI.md)** | 踩坑大全，症状-根因-正确做法 | 遇到问题的人 |
-| 📊 **[LingoFuse_LLM_Service_Work_Summary.md](src/LingoFuse_LLM_Service_Work_Summary.md)** | 版本演进与架构决策（历史参考） | 想了解内部实现的人 |
-| 📦 **[llama_cpp_python_guide.md](src/llama_cpp_python_guide.md)** | `llama-cpp-python` 安装与使用 | 装依赖的人 |
-| 📝 **[pascal_agent_api_ref_json.md](src/pascal_agent_api_ref_json.md)** | `agent_main` / `register_agent` JSON 结构详解 | 开发工具提供者的人 |
+> **注意**：`code_decl_to_mcp.exe` 的源码不在本仓库中，本仓库仅提供手册与规范。请从预编译发布页获取。
 
 ---
 
 ## 📦 组件清单
 
 | 组件 | 作用 | 谁关心 |
-| ----------------------- | ------------------------------ | -------------- |
-| **Pascal 信标**（`pascal_agent_service.exe`） | 登记和发现所有工具 | 部署服务的你 |
-| **Pascal 工具提供者**（如 `pascal_agent_api.exe`） | 把你的 Pascal 函数注册为工具 | 写 Pascal 的你 |
-| **MCP 协议网关**（`mcp_api_tool.exe`） | 路径 A：把工具翻译成 MCP 协议给 AI 客户端 | 用 MCP 客户端的你 |
-| **MCP 调试代理**（`mcp_api_proxy.exe`） | stdio 通信的透明转发 + 日志记录 | 需要排查 MCP 握手的你 |
-| **代码生成器**（`code_decl_to_mcp.exe`） | 从 Pascal / C 声明一键生成工具提供者单元 | 开发阶段的你 |
-| **LLM 本地服务**（`llm_service.exe`） | 本地跑大模型，完全离线 | 想断网的你 |
-| **LLM 纯转发**（`llm_proxy.exe`） | 转发到 LM Studio / Ollama / 云 API | 想用云端模型的你 |
-| **LLM 工具桥**（`llm_proxy_tool.exe`，LTB） | 路径 B：转发 + **服务端代管工具执行** | 客户端不支持 MCP 的你 |
-| **LLM 测试客户端**（`llm_test.exe`） | 命令行交互式 REPL，验证 LLM 服务 | 调试 LLM 的你 |
-| **HTTP 桥接网关**（`bridge.exe`） | 让 Web 生态通过 HTTP 访问 LingoFuse 服务 | 用浏览器/Node/PHP 的你 |
-| **健康检查**（`HealthCheck.exe`） | 快速验证编译环境和动态库是否就绪 | 首次部署的你 |
-
-> **提示**：`code_decl_to_mcp.exe` 的源码不在本仓库中，请从预编译发布页获取。其余组件的源码均在 `src/` 目录下。
+|------|------|--------|
+| `pascal_agent_service.exe` | **信标**：登记和发现所有工具 | 部署服务的你 |
+| `pascal_agent_api.exe` | **工具提供者示例**：把 Pascal 函数注册为工具 | 写 Pascal 的你 |
+| `mcp_api_tool.exe` | **MCP 网关**：路径 A，翻译成 MCP 协议 | 用 MCP 客户端的你 |
+| `mcp_api_proxy.exe` | **MCP 调试代理**：stdio 透明转发 + 日志 | 排查 MCP 握手的你 |
+| `code_decl_to_mcp.exe` | **代码生成器**：从声明一键生成工具提供者单元 | 开发阶段的你 |
+| `llm_service.exe` | **LLM 本地服务**：本地跑 GGUF，完全离线 | 想断网的你 |
+| `llm_proxy.exe` | **LLM 纯转发**：转发到外部后端，只对话 | 只用对话的你 |
+| `llm_proxy_tool.exe`（LTB） | **LLM 工具桥**：转发 + **服务端代管工具执行** | 想让智能体调用工具 API 的你 |
+| `llm_test.exe` | **LLM 测试客户端**：命令行交互式 REPL | 调试 LLM 的你 |
+| `bridge.exe` | **HTTP 桥接网关**：让浏览器 / Node / PHP 访问 | Web 生态的你 |
+| `HealthCheck.exe` | **健康检查**：快速验证环境 | 首次部署的你 |
 
 ---
 
@@ -343,33 +255,22 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph Root["D:\LingoFuse-pasAgent\"]
-        R1["Build_Guide.md"]
-        R2["Dependency_Installation_Guide.md"]
-        R3["mcp_api_tool_DOUBAO_GUIDE.md"]
-        R4["NVIDIA-Nemotron-...-UD-IQ4_NL.md"]
-        R5["code_generate_mcp.md"]
-        R6["pascal_code_mcp_rule.md"]
-        R7["C_code_mcp_rule.md"]
-        R8["LingoFuse_mcp_api_tool_Implementation_Memo.md"]
-        R9["LingoFuse_Python_Binding_Migration_Record.md"]
-        R10["Qwen2.5-7B-Instruct-Q4_K_M.md"]
-        R11["Local LLM Agent Handbook ..."]
-        R12["readme.md / LICENSE"]
+    subgraph Root["LingoFuse-pasAgent/"]
+        R1["📘 文档<br/>Build_Guide / Dependency_Installation_Guide<br/>mcp_api_tool_DOUBAO_GUIDE / NVIDIA-Nemotron-..."]
+        R2["📐 规范<br/>code_generate_mcp / pascal_code_mcp_rule / C_code_mcp_rule"]
+        R3["📊 历史<br/>Implementation_Memo / Migration_Record / Qwen2.5-7B"]
+        R4["📝 元信息<br/>readme.md / llms.txt / LICENSE"]
     end
 
-    subgraph Src["src\"]
-        S1["pascal_agent_service.lpr / .lpi"]
-        S2["pascal_agent_api.lpr / .lpi"]
-        S3["lingofuse_helper.pas / lingofuse_import.pas"]
-        S4["mcp_api_tool.py / mcp_api_proxy.py"]
-        S5["language_middleware.py / generate_agent_json.py"]
-        S6["llm_service.py / llm_proxy.py / llm_proxy_tool.py / llm_test.py"]
-        S7["build_*.ps1 / build_pascal_agent.bat / init_env.ps1"]
-        S8["LingoFuse_LLM_*.md（7 份 LLM 生态文档）"]
-        S9["lingofuse/（Python 绑定包）"]
-        S10["CreateHealthCheck/（健康检查示例）"]
-        S11["pascal_agent_api_ref_json.md"]
+    subgraph Src["src/"]
+        S1["🅿️ Pascal<br/>pascal_agent_service / pascal_agent_api<br/>lingofuse_helper / lingofuse_import"]
+        S2["🌉 MCP 网关<br/>mcp_api_tool.py / mcp_api_proxy.py"]
+        S3["🔧 中间件<br/>language_middleware.py / generate_agent_json.py"]
+        S4["🧠 LLM<br/>llm_service.py / llm_proxy.py<br/>llm_proxy_tool.py / llm_test.py"]
+        S5["🔨 构建<br/>build_*.ps1 / build_pascal_agent.bat / init_env.ps1"]
+        S6["📚 LLM 文档<br/>LingoFuse_LLM_*.md（8 份）"]
+        S7["🐍 绑定<br/>lingofuse/（Python 包）"]
+        S8["🧪 示例<br/>CreateHealthCheck/ / pascal_agent_api_ref_json.md"]
     end
 
     style Root fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
@@ -385,35 +286,44 @@ flowchart TB
 
 ---
 
-## 📚 文档地图与阅读引导
+## 📚 文档地图
 
-### 第一步：新手入门
+### 新手入门
 
-- 🎓 **[mcp_api_tool_DOUBAO_GUIDE.md](mcp_api_tool_DOUBAO_GUIDE.md)** —— 保姆级教程，零基础让 AI 调用第一个 Pascal 工具。
+- 🎓 **[mcp_api_tool_doubao_guide.md](mcp_api_tool_doubao_guide.md)** —— 保姆级教程，零基础让 AI 调用第一个 Pascal 工具。
 
-### 第二步：理解闭环
+### 理解闭环
 
-- 🌐 **[LingoFuse_LLM_Ecosystem_User_Guide.md](src/LingoFuse_LLM_Ecosystem_User_Guide.md)** —— 三种服务端、两条工具路径、能力发现机制全景。
+- 🌐 **[LingoFuse_LLM_Ecosystem_User_Guide.md](src/LingoFuse_LLM_Ecosystem_User_Guide.md)** —— 三种服务端、两条路径、能力发现机制全景。
 - 🧠 **[Local LLM Agent Handbook CPU First, GPU Optional.md](Local%20LLM%20Agent%20Handbook%20CPU%20First%2C%20GPU%20Optional.md)** —— 智能体原理与本地 LLM 入门。
 
-### 第三步：开发工具
+### 开发工具
 
-- 📐 **[pascal_code_mcp_rule.md](pascal_code_mcp_rule.md)** —— Pascal 声明规范（解析契约）。
-- 📐 **[C_code_mcp_rule.md](C_code_mcp_rule.md)** —— C 声明规范（解析契约）。
+- 📐 **[pascal_code_mcp_rule.md](pascal_code_mcp_rule.md)** —— Pascal 声明规范。
+- 📐 **[C_code_mcp_rule.md](C_code_mcp_rule.md)** —— C 声明规范。
 - ⚙️ **[code_generate_mcp.md](code_generate_mcp.md)** —— 代码生成器使用手册。
-- 📝 **[pascal_agent_api_ref_json.md](src/pascal_agent_api_ref_json.md)** —— `agent_main` / `register_agent` 的 JSON 结构详解。
+- 📝 **[pascal_agent_api_ref_json.md](src/pascal_agent_api_ref_json.md)** —— `agent_main` / `register_agent` JSON 详解。
 
-### 第四步：部署 LLM 与配置
+### 部署 LLM 与配置
 
-- 🔨 **[Build_Guide.md](Build_Guide.md)** —— 编译 Pascal 与 Python 组件为 EXE（含 4 个 LLM EXE）。
+- 🔨 **[Build_Guide.md](Build_Guide.md)** —— 编译 Pascal 与 Python 组件为 EXE。
 - 📦 **[Dependency_Installation_Guide.md](Dependency_Installation_Guide.md)** —— 依赖安装与动态库部署。
 - 🤖 **[NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md](NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md)** —— 推荐模型下载与部署。
-- ⚙️ **[LingoFuse_LLM_Service_CLI_guide.md](src/LingoFuse_LLM_Service_CLI_guide.md)** —— LLM 服务命令行手册。
-- ⚙️ **[LingoFuse_LLM_Proxy_CLI_Guide.md](src/LingoFuse_LLM_Proxy_CLI_Guide.md)** —— LLM 代理命令行手册。
+
+**三种服务端命令行手册**：
+
+| 服务端 | 手册 | 什么时候用 |
+|--------|------|-----------|
+| 🟢 `llm_service.exe` | [LingoFuse_LLM_Service_CLI_guide.md](src/LingoFuse_LLM_Service_CLI_guide.md) | **本地加载 GGUF 模型推理** |
+| 🟣 `llm_proxy.exe` | [LingoFuse_LLM_Proxy_CLI_Guide.md](src/LingoFuse_LLM_Proxy_CLI_Guide.md) | **纯文本转发，只对话** |
+| 🔴 `llm_proxy_tool.exe`（LTB） | **[LingoFuse_LLM_Proxy_Tool_CLI_Guide.md](src/LingoFuse_LLM_Proxy_Tool_CLI_Guide.md)** | **转发 + 服务端工具执行，让智能体调用 tools API** |
+
+**其他**：
+
 - 📋 **[LingoFuse_LLM_Proxy_Compatibility_Guide.md](src/LingoFuse_LLM_Proxy_Compatibility_Guide.md)** —— 129+ 后端清单（LTB 亦适用）。
 - 📦 **[llama_cpp_python_guide.md](src/llama_cpp_python_guide.md)** —— `llama-cpp-python` 安装。
 
-### 第五步：深入与排错
+### 深入与排错
 
 - 📝 **[LingoFuse_mcp_api_tool_Implementation_Memo.md](LingoFuse_mcp_api_tool_Implementation_Memo.md)** —— MCP 网关实施备忘与坑点。
 - 🚨 **[LingoFuse_LLM_Pitfalls_For_AI.md](src/LingoFuse_LLM_Pitfalls_For_AI.md)** —— LLM 生态踩坑大全。
@@ -435,17 +345,13 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 > **新手提示**：预编译包已内置所需动态库，**无需单独安装**。
 
-### ⚠️ 首次运行缺少 DLL？别慌！
+### ⚠️ 首次运行缺少 DLL？
 
-如果第一次运行时提示找不到 `LingoFuse64.dll` / `z_ipc_64.dll` 等动态库，而你又**不想自己编译 LingoFuse**：
+如果提示找不到 `LingoFuse64.dll` / `z_ipc_64.dll`，**不想自己编译 LingoFuse**：
 
-👉 **直接去预编译包发布页找现成的**：[https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
+👉 **直接去预编译包发布页找现成的**：[releases/tag/pre_build](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
 
-那里已经打包好了所有需要的动态库，**下载解压即用**。
-
-**⚠️ 运行环境依赖**：  
-预编译 DLL 使用 **Visual Studio 2022** 编译，运行时需要安装 **VS2022 可再发行组件（VC++ Redistributable）**。  
-请从微软官方下载并安装对应架构的版本：
+**运行环境依赖**：预编译 DLL 使用 **Visual Studio 2022** 编译，运行时需要安装 **VS2022 可再发行组件（VC++ Redistributable）**：
 
 - [VC++ Redistributable for Visual Studio 2022 (x86/x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
 
@@ -465,7 +371,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 ## ❓ 常见问题
 
 | 问题 | 回答 |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------- |
+|------|------|
 | 需要懂 MCP 协议吗？ | **不需要**，写 Pascal 就行 |
 | 只支持豆包吗？ | **支持所有 MCP 客户端**：豆包 / LM Studio / Claude / Continue.dev / Jan / DeepSeek |
 | 只能做加减乘除吗？ | **任何 Pascal 函数**：数据库、文件、硬件、GUI…… |
@@ -477,6 +383,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 | 如何让 AI 自动调用工具？ | 路径 A：启动 `mcp_api_tool`；路径 B：启动 `llm_proxy_tool` |
 | LLM 体系文档在哪里？ | 全部在 **[`src/`](src/)** 目录下 |
 | 代码生成器的源码在哪？ | **不在本仓库中**，本仓库仅提供手册。请从预编译发布页获取 `code_decl_to_mcp.exe` |
+| 能长时间跑吗？ | **能**。专门做过加固：单 worker 串行、双条件回收、句柄自动回收、异常隔离。**实测可稳定处理数万条交互命令或 function call** |
 
 ---
 
