@@ -1,52 +1,65 @@
-# LingoFuse MCP Server 实施备忘（更新至 2026-09-10）
+# LingoFuse MCP Server 实施备忘
 
-> 本文档记录了 LingoFuse MCP Server 及相关工具链的完整改造、调试和交付过程。
-> 本次更新（2026‑09‑10）追加了 **stdio 传输全链路打通** 的完整记录，包括从
-> "stdio 无法连接" 到 "stdio + proxy 双模式可用" 的全过程，以及过程中暴露并
-> 修复的 7 个关键问题。
+> **文档路径**：`LingoFuse_MCP_Server_Implementation_Memo.md`  
+> **版本**：V2.0  
+> **最后更新**：2026-09-14  
+> **涵盖周期**：2026-09-08 ~ 2026-09-10（原始工作） / 2026-09-14（文档更新）  
+> **相关文档**（同目录）：
+> - 项目总览：`readme.md`
+> - MCP 新手指南：`MCP_SERVER_DOUBAO_GUIDE.md`
+> - 编译指南：`Build_Guide.md`
+> - 依赖安装：`Dependency_Installation_Guide.md`
+> - 生态体系总览（子目录）：`src/llm-service/LingoFuse_LLM_Ecosystem_User_Guide.md`
 
 ---
 
-## 目录
+## 阅读引导
 
-1. [项目背景与目标](#一项目背景与目标)
-2. [架构总览](#二架构总览)
-3. [完成的主要工作项](#三完成的主要工作项)
-   - 3.1 [打包（EXE）适配](#31-打包exe适配)
-   - 3.2 [传输协议升级（SSE → Streamable HTTP）](#32-传输协议升级sse--streamable-http)
-   - 3.3 [配置生成器增强](#33-配置生成器增强generate_agent_jsonpy)
-   - 3.4 [日志系统重构](#34-日志系统重构)
-   - 3.5 [中文乱码 & 控制台颜色](#35-中文乱码--控制台颜色)
-   - 3.6 [JSON 序列化优化](#36-json-序列化优化)
-   - 3.7 [动态工具缓存一致性](#37-动态工具缓存一致性2026-09-09)
-   - 3.8 [离线检测修复](#38-离线检测修复2026-09-09)
-   - 3.9 [**stdio 传输全链路打通（2026-09-10）**](#39-stdio-传输全链路打通2026-09-10)
-4. [stdio 模式启动链路剖析](#四stdio-模式启动链路剖析)
-5. [最终交付物清单](#五最终交付物清单)
-6. [已验证场景](#六已验证场景)
-7. [已知限制与后续建议](#七已知限制与后续建议)
-8. [回滚与紧急预案](#八回滚与紧急预案)
-9. [总结](#九总结)
+本文档记录了 LingoFuse MCP Server 及相关工具链的完整改造、调试和交付过程。建议按以下顺序阅读：
+
+1. **想了解做了什么** → 读第一章「项目背景与目标」和第二章「架构总览」。
+2. **想了解关键问题与修复** → 读第三章「完成的主要工作项」。
+3. **想了解 stdio 传输打通细节** → 读第四章「stdio 模式启动链路剖析」。
+4. **想了解交付物** → 读第五章「最终交付物清单」。
+5. **想了解限制和回滚** → 读第七、八章。
+
+**本次更新（V2.0）**主要将文档更新为高对比配色，拆分大型图表以提升可读性。
 
 ---
 
 ## 一、项目背景与目标
 
 - **项目名称**：LingoFuse MCP Server（Model Context Protocol 服务网关）
-- **核心用途**：作为 LM Studio、Claude Desktop 等 MCP 客户端与 LingoFuse
-  后端（Pascal / 任意语言）之间的桥梁，动态注册并调用后端工具。
-- **原始版本基线**：v2.21（2026‑09‑08）
-- **当前版本**：v2.40（2026‑09‑10）
-- **主要目标**：
-  1. 修复打包为 EXE 后配置生成和日志路径问题；
-  2. 升级传输协议，从 SSE 过渡到 Streamable HTTP（官方推荐）；
-  3. 解决控制台中文乱码及颜色输出问题；
-  4. 增强日志可观测性（Agent 日志前缀、文件日志开关）；
-  5. 确保所有改动兼容 PyInstaller 打包场景；
-  6. 修复动态工具缓存不一致问题；
-  7. 修复 `LF_CheckApi` 离线误报问题；
-  8. **（2026‑09‑10 新增）打通 stdio 传输，使 LM Studio 可以通过
-     `mcp_server.py` 直连或经 `mcp_proxy.py` 中转运行。**
+- **核心用途**：作为 LM Studio、Claude Desktop 等 MCP 客户端与 LingoFuse 后端（Pascal / 任意语言）之间的桥梁，动态注册并调用后端工具。
+- **原始版本基线**：v2.21（2026-09-08）
+- **当前版本**：v2.42（2026-09-10）
+
+### 主要目标
+
+1. 修复打包为 EXE 后配置生成和日志路径问题；
+2. 升级传输协议，从 SSE 过渡到 Streamable HTTP（官方推荐）；
+3. 解决控制台中文乱码及颜色输出问题；
+4. 增强日志可观测性（Agent 日志前缀、文件日志开关）；
+5. 确保所有改动兼容 PyInstaller 打包场景；
+6. 修复动态工具缓存不一致问题；
+7. 修复 `LF_CheckApi` 离线误报问题；
+8. **打通 stdio 传输**，使 LM Studio 可以通过 `mcp_server.exe` 直连或经 `mcp_proxy.exe` 中转运行。
+
+### 图 1：项目在整个闭环中的定位
+
+```mermaid
+flowchart LR
+    A["📄 Pascal 工具"] --> B["📡 信标"]
+    B --> C["🌉 MCP 网关<br/>mcp_server.exe"]
+    C --> D["🤖 AI 客户端"]
+    D --> E["🧠 LLM 服务"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+    style D fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style E fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+```
 
 ---
 
@@ -60,31 +73,63 @@
 | `http` | 手动启动，监听端口 | 远程 / 多客户端 / 弱网 | 低 |
 | `sse` | 手动启动，监听端口（已弃用） | 遗留客户端 | 低 |
 
+### 图 2：三种传输模式选择
+
+```mermaid
+flowchart TD
+    START["选择传输模式"] --> Q1{"客户端是本地进程?"}
+    Q1 -->|是| Q2{"客户端初始化超时 < 5 秒?"}
+    Q1 -->|否| HTTP["✅ 使用 http 模式"]
+    Q2 -->|是| HTTP
+    Q2 -->|否| STDIO["✅ 使用 stdio 模式"]
+    STDIO --> PROXY{"需要调试?"}
+    PROXY -->|是| SP["stdio + mcp_proxy"]
+    PROXY -->|否| SD["stdio 直连"]
+
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style Q1 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q2 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style PROXY fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style HTTP fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style STDIO fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style SP fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style SD fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
+
 ### 2.2 数据流（stdio + proxy）
 
-```
-LM Studio  ──stdio──▶  mcp_proxy.py  ──stdio（过滤后）──▶  LM Studio
-                       │
-                       └──stdin/stdout/stderr──▶  mcp_server.py
-                                                  ├─ fd 1 (stdout) ← FastMCP JSON-RPC
-                                                  │                 + LingoFuse C 层诊断
-                                                  └─ fd 2 (stderr) ← Python 日志
+```mermaid
+flowchart LR
+    A["🤖 LM Studio"] -->|"stdio"| B["🕵️ mcp_proxy.exe"]
+    B -->|"stdio（过滤后）"| C["🌉 mcp_server.exe"]
+    C -->|"fd 1 stdout"| D["FastMCP JSON-RPC"]
+    C -->|"fd 2 stderr"| E["Python 日志"]
+    B -->|"丢弃到 proxy.log"| F["📋 诊断日志"]
+
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style E fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style F fill:#5D6D7E,stroke:#2C3E50,stroke-width:3px,color:#FFFFFF
 ```
 
-- `mcp_proxy.py` 拦截 mcp_server 的 stdout，**仅转发以 `{` 开头的行**
-  （MCP 不使用 JSON-RPC batch，故无需接受 `[`）。
-- C 层的诊断输出（`Wait Connection ReadyOk = True`、`Clean Framework.` 等）
-  被丢弃到 `proxy.log` 与 stderr，不再污染协议流。
+`mcp_proxy.exe` 拦截 mcp_server 的 stdout，**仅转发以 `{` 开头的行**（MCP 不使用 JSON-RPC batch，故无需接受 `[`）。C 层的诊断输出（`Wait Connection ReadyOk = True`、`Clean Framework.` 等）被丢弃到 `proxy.log` 与 stderr，不再污染协议流。
 
 ### 2.3 数据流（stdio 直连）
 
-```
-LM Studio  ──stdio──▶  mcp_server.py  ──stdout──▶  LM Studio
+```mermaid
+flowchart LR
+    A["🤖 LM Studio"] -->|"stdio"| B["🌉 mcp_server.exe"]
+    B -->|"stdout"| A
+    B -->|"ConsoleOutput=False<br/>Quiet=True"| C["关闭 LingoFuse C 层输出"]
+
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
 ```
 
-- 通过 `LF_SetOption("ConsoleOutput", "False")` + `LF_SetOption("Quiet", "True")`
-  关闭 LingoFuse C 层的 fd 1 输出。
-- 适用于 LM Studio 的 initialize 超时 ≥ 5 秒的版本。
+通过 `LF_SetOption("ConsoleOutput", "False")` + `LF_SetOption("Quiet", "True")` 关闭 LingoFuse C 层的 fd 1 输出。适用于 LM Studio 的 initialize 超时 ≥ 5 秒的版本。
 
 ---
 
@@ -104,19 +149,29 @@ LM Studio  ──stdio──▶  mcp_server.py  ──stdout──▶  LM Studio
 - **改动**：
   - `mcp_server.py` 增加 `--transport http` 选项。
   - 保留 `--transport sse`（标记弃用，运行时输出警告）。
-  - `generate_agent_json.py` 生成三种配置：`_stdio.json`、`_http.json`、
-    `_sse.json`。
+  - `generate_agent_json.py` 生成三种配置：`_stdio.json`、`_http.json`、`_sse.json`。
   - 所有 README 文档同步推荐 HTTP。
+
+### 图 3：传输协议演进
+
+```mermaid
+flowchart LR
+    A["🔴 SSE<br/>已弃用"] -.->|"官方弃用"| B["🟢 Streamable HTTP<br/>推荐"]
+    B --> C["/mcp 端点"]
+    A --> D["/sse 端点<br/>仅遗留客户端"]
+
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style D fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+```
 
 ### 3.3 配置生成器增强（`generate_agent_json.py`）
 
 - **新增 `--proxy-path` 参数**：若提供，额外生成 `_stdio_proxy.json`。
 - **自动添加 `--log-file`**：生成的 stdio 配置默认附带 `--log-file`。
 - **绝对路径处理**：日志文件路径使用 `resolve()` 转绝对路径。
-- **（v2.4 修正）**：proxy 未启用时，MD 文档不再输出 `(proxy not available)`
-  的空块；`--output-dir` 提示改用用户传入的原始路径，便于直接复制命令。
-- **proxy 命令构造**：按 server 类型（`is_exe`）决定 proxy 是脚本还是 exe，
-  确保源模式/打包模式一致。
+- **proxy 命令构造**：按 server 类型（`is_exe`）决定 proxy 是脚本还是 exe，确保源模式/打包模式一致。
 
 ### 3.4 日志系统重构
 
@@ -139,12 +194,8 @@ LM Studio  ──stdio──▶  mcp_server.py  ──stdout──▶  LM Studio
 
 ### 3.6 JSON 序列化优化
 
-- **问题**：`json.dumps` 默认 `ensure_ascii=True`，中文字符被转义为
-  `\uXXXX`，后端日志无法直接显示中文。
-- **修复**：所有序列化调用改用 `ensure_ascii=False`：
-  - `mcp_server.py` 的 `call_tool`
-  - `language_middleware.py` 的 `call_tool`
-  - 其他构造 JSON 的位置
+- **问题**：`json.dumps` 默认 `ensure_ascii=True`，中文字符被转义为 `\uXXXX`，后端日志无法直接显示中文。
+- **修复**：所有序列化调用改用 `ensure_ascii=False`。
 - **验证**：Pascal 后端日志成功打印中文诗句。
 
 ### 3.7 动态工具缓存一致性（2026-09-09）
@@ -157,16 +208,42 @@ LM Studio  ──stdio──▶  mcp_server.py  ──stdout──▶  LM Studio
 
 #### 3.7.2 根本原因
 
-- `_reg_tool_callback`（由 `register_agent` 触发）**无条件向 `self._tools`
-  写入工具定义**，与 `_fetch_tools_from_backend` 形成竞态。
+- `_reg_tool_callback`（由 `register_agent` 触发）**无条件向 `self._tools` 写入工具定义**，与 `_fetch_tools_from_backend` 形成竞态。
 
 #### 3.7.3 解决方案（v7.2 / v7.3）
 
 - 修改 `_register_tool`：**不再修改 `self._tools`**，仅记录日志。
 - `_fetch_tools_from_backend` 中**先清空再填充**，确保每次均为权威数据。
 - 工具列表完全由 `agent_main` 驱动，避免缓存污染。
-- **（v7.3 追加）** `_reg_tool_callback` 读取字段改为 `name`（与 Pascal 端
-  `do_register_agent` 一致），原实现读 `tool_name` 导致永远失败。
+- **（v7.3 追加）** `_reg_tool_callback` 读取字段改为 `name`（与 Pascal 端一致），原实现读 `tool_name` 导致永远失败。
+
+### 图 4：动态工具缓存修复
+
+```mermaid
+flowchart TB
+    subgraph OLD["❌ 修复前：竞态污染"]
+        O1["register_agent 回调"] -->|"无条件写入"| O3["self._tools 缓存"]
+        O2["_fetch_tools_from_backend"] -->|"先清空再填充"| O3
+        O3 -.->|"异步触发"| O4["缓存被污染"]
+    end
+
+    subgraph NEW["✅ 修复后：单一来源"]
+        N1["register_agent 回调"] -->|"仅记录日志"| N3["self._tools 缓存"]
+        N2["_fetch_tools_from_backend"] -->|"权威数据"| N3
+        N3 --> N4["工具列表与后端一致"]
+    end
+
+    style OLD fill:#FADBD8,stroke:#922B21,stroke-width:3px,color:#5A1A14
+    style NEW fill:#D5F5E3,stroke:#1E8449,stroke-width:3px,color:#0E4D2A
+    style O1 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style O2 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style O3 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style O4 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style N1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style N2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style N3 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style N4 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
 
 ### 3.8 离线检测修复（2026-09-09）
 
@@ -178,7 +255,7 @@ LM Studio  ──stdio──▶  mcp_server.py  ──stdout──▶  LM Studio
 
 `Find_Remote_API` 未过滤离线客户端，其 `Service_Info` 缓存未清空。
 
-#### 3.8.3 Pascal 侧补丁（`Z.Net.C4.LingoFuse.pas`，建议应用）
+#### 3.8.3 Pascal 侧补丁
 
 ```pascal
 if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(...) then
@@ -187,12 +264,9 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 确保只有**当前在线且已收到服务广播**的客户端才被视为有效。
 
----
-
 ### 3.9 stdio 传输全链路打通（2026-09-10）
 
-这是本次工作的**核心攻坚**。stdio 从"完全不能连接"到"直连 / proxy
-双模式可用"，共经历 7 个独立问题的定位与修复。
+这是本次工作的**核心攻坚**。stdio 从"完全不能连接"到"直连 / proxy 双模式可用"，共经历 7 个独立问题的定位与修复。
 
 #### 3.9.1 问题总览
 
@@ -215,8 +289,7 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 # 子进程（run_fastmcp）：才做初始化
 ```
 
-避免了 `Successfully loaded from system PATH` 与 `Retrieved N tools`
-在日志中各出现两次。
+避免了 `Successfully loaded from system PATH` 与 `Retrieved N tools` 在日志中各出现两次。
 
 **（2）banner 抑制（v2.33）**
 
@@ -226,9 +299,7 @@ FastMCP 4.0.x 的 `run()` 签名：
 FastMCP.run(self, transport=None, show_banner: bool | None = None, ...)
 ```
 
-`show_banner` 默认 `None`（从 settings 解析），仅靠环境变量已不足。
-修复：显式传 `show_banner=SHOW_BANNER`（默认 `False`），并附加设置
-`FASTMCP_SHOW_SERVER_BANNER="false"` + `FASTMCP_BANNER="none"` 作双保险。
+`show_banner` 默认 `None`（从 settings 解析），仅靠环境变量已不足。修复：显式传 `show_banner=SHOW_BANNER`（默认 `False`），并附加设置 `FASTMCP_SHOW_SERVER_BANNER="false"` + `FASTMCP_BANNER="none"` 作双保险。
 
 **（3）stdio 模式关闭 C 层输出（v2.38）**
 
@@ -240,15 +311,11 @@ if TRANSPORT == "stdio" and LF_SetOption is not None:
     LF_SetOption(b"Quiet", b"True")
 ```
 
-注意顺序：`_ensure_native_loaded()` 之后、`_ensure_language_middleware_loaded()`
-之前。因为 `language_middleware` 的模块级代码会调用 `LF_SetOption`，
-必须确保 `ConsoleOutput` 已经关闭。
+注意顺序：`_ensure_native_loaded()` 之后、`_ensure_language_middleware_loaded()` 之前。因为 `language_middleware` 的模块级代码会调用 `LF_SetOption`，必须确保 `ConsoleOutput` 已经关闭。
 
 **（4）stdio 走主进程，http/sse 走子进程（v2.39）**
 
-Windows 的 `multiprocessing` 是 spawn 模式，会重启 Python 解释器、
-重新 import 所有模块、重新加载 LingoFuse DLL、重新连接后端，
-把启动时间从 4-5 秒拉长到 9 秒，超过 MCP 客户端的 initialize 超时。
+Windows 的 `multiprocessing` 是 spawn 模式，会重启 Python 解释器、重新 import 所有模块、重新加载 LingoFuse DLL、重新连接后端，把启动时间从 4-5 秒拉长到 9 秒，超过 MCP 客户端的 initialize 超时。
 
 修复：
 
@@ -266,11 +333,8 @@ else:
 **（5）proxy 修复（v2.1 / v2.2 / v2.3）**
 
 - v2.1：新增 JSON-RPC 行过滤。`Server->LM` 方向只转发 `{` 开头的行。
-- v2.2：`source.read(BLOCK_SIZE)` → `source.read1(BLOCK_SIZE)`。
-  `read1` 在任何数据可用时立即返回，避免 `sys.stdin.buffer` 阻塞。
-- v2.3：移除 `subprocess.Popen(..., bufsize=0)`。`bufsize=0` 使子进程
-  stdin 变成无缓冲的 `io.FileIO`，Windows 上表现为非阻塞，FastMCP 会立即
-  读到 EOF 退出。
+- v2.2：`source.read(BLOCK_SIZE)` → `source.read1(BLOCK_SIZE)`。`read1` 在任何数据可用时立即返回，避免 `sys.stdin.buffer` 阻塞。
+- v2.3：移除 `subprocess.Popen(..., bufsize=0)`。`bufsize=0` 使子进程 stdin 变成无缓冲的 `io.FileIO`，Windows 上表现为非阻塞，FastMCP 会立即读到 EOF 退出。
 
 **（6）参数类型注解恢复（v2.40）**
 
@@ -282,8 +346,7 @@ required_parts.append(py_param)              # ❌ 无类型
 optional_parts.append(f"{py_param}=None")    # ❌ 无类型
 ```
 
-FastMCP 从签名生成 JSON Schema 时，无注解的参数推导为 `Any` 或空对象。
-LM Studio 收到后发送 `{"a": {}, "b": {}}`，Pascal 端想当整数用，抛异常。
+FastMCP 从签名生成 JSON Schema 时，无注解的参数推导为 `Any` 或空对象。LM Studio 收到后发送 `{"a": {}, "b": {}}`，Pascal 端想当整数用，抛异常。
 
 修复：新增 `_json_type_to_python` 映射辅助函数，恢复注解。
 
@@ -344,14 +407,32 @@ def _eprint(msg: str) -> None:
 | 启动耗时 | ~9 秒（超时） | ~4-5 秒（成功） |
 | LM Studio 收到乱码 | 大量 C 层诊断 | ✅ 只有 JSON-RPC |
 
+### 图 5：stdio 传输打通过程
+
+```mermaid
+flowchart LR
+    A["v2.30<br/>职责分离"] --> B["v2.33<br/>banner 抑制"]
+    B --> C["v2.38<br/>关闭 C 层输出"]
+    C --> D["v2.39<br/>stdio 走主进程"]
+    D --> E["v2.40<br/>参数类型恢复"]
+    E --> F["✅ stdio 可用"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:2px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C fill:#5B2C6F,stroke:#321640,stroke-width:2px,color:#FFFFFF
+    style D fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style E fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
+    style F fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+```
+
 ---
 
 ## 四、stdio 模式启动链路剖析
 
-以 v2.40 为例，stdio 直连的完整启动时间线（LM Studio 视角）：
+以 v2.42 为例，stdio 直连的完整启动时间线（LM Studio 视角）：
 
 ```
-[T+0.0s]  LM Studio 启动 mcp_server.py 子进程
+[T+0.0s]  LM Studio 启动 mcp_server.exe 子进程
 [T+0.5s]  Python 解释器启动完成，开始 import 模块
 [T+1.0s]  _ensure_native_loaded() 加载 LingoFuse64.dll
 [T+1.0s]  LF_SetOption(ConsoleOutput=False, Quiet=True)
@@ -363,8 +444,30 @@ def _eprint(msg: str) -> None:
 [T+5.0s]  FastMCP 开始读 stdin，处理 LM Studio 的 initialize
 ```
 
-**关键约束**：从 `LM Studio 启动子进程` 到 `FastMCP 开始读 stdin` 必须
-小于 MCP 客户端的 initialize 超时。LM Studio 实测约为 **5 秒**。
+### 图 6：启动时序
+
+```mermaid
+sequenceDiagram
+    participant LM as LM Studio
+    participant S as mcp_server
+    participant LF as LingoFuse
+    participant B as 信标
+
+    LM->>S: 启动子进程
+    S->>S: Python 解释器启动
+    S->>LF: 加载动态库
+    S->>LF: 关闭 ConsoleOutput
+    S->>LF: PrepareClient
+    LF->>B: 连接 ipc:agent
+    B-->>LF: 就绪
+    LF-->>S: PrepareDone 返回
+    S->>B: 调用 agent_main
+    B-->>S: 返回 8 个工具
+    S->>S: 注册工具，FastMCP 就绪
+    S-->>LM: 开始读 stdin
+```
+
+**关键约束**：从 `LM Studio 启动子进程` 到 `FastMCP 开始读 stdin` 必须小于 MCP 客户端的 initialize 超时。LM Studio 实测约为 **5 秒**。
 
 - 主进程直跑（v2.39）：4.5-5 秒，**刚好卡在边缘**。
 - 加 proxy（v2.3）：多 0.5 秒，**有超时风险**。
@@ -379,13 +482,13 @@ def _eprint(msg: str) -> None:
 
 | 文件 | 版本 | 说明 |
 |------|------|------|
-| `mcp_server.py` | **v2.40** | stdio 主进程运行 + 参数类型注解修复 + ConsoleOutput 抑制 |
+| `mcp_server.py` | **v2.42** | stdio 主进程运行 + 参数类型注解修复 + ConsoleOutput 抑制 |
 | `language_middleware.py` | **v7.3** | `_read_string` 容错 + `ensure_ascii=False` + `reg_tool` 字段名对齐 |
-| `mcp_proxy.py` | **v2.3** | JSON-RPC 行过滤 + `read1` + 无 `bufsize=0` |
+| `mcp_proxy.py` | **v2.5** | JSON-RPC 行过滤 + `read1` + 无 `bufsize=0` |
 | `_lf_native.py` | v1.x | 加载信息走 stderr |
-| `generate_agent_json.py` | **v2.4** | proxy 配置生成 |
-| `pascal_agent_service.lpr` | — | 后端信标 |
-| `pascal_agent_api.lpr` | — | 工具提供者示例 |
+| `generate_agent_json.py` | **v2.5** | proxy 配置生成 |
+| `pascal_agent_service.exe` | — | 后端信标 |
+| `pascal_agent_api.exe` | — | 工具提供者示例 |
 
 ### 5.2 打包脚本
 
@@ -397,17 +500,14 @@ def _eprint(msg: str) -> None:
 
 ### 5.3 文档
 
-| 文件 | 状态 | 说明 |
-|------|------|------|
-| `readme.md` | 已重写 | 项目总览 |
-| `MCP_SERVER_DOUBAO_GUIDE.md` | 已交付 | 零基础新手教程 |
-| `Build_Guide.md` | V2.0 | 编译指南 |
-| `Dependency_Installation_Guide.md` | V2.0 | 依赖安装 |
-| `LingoFuse_LLM_Service_guide.md` | V1.0 | LLM 服务命令行 |
-| `pascal_code_rule.md` | V3.0 | Pascal 声明规范 |
-| `LingoFuse_MCP_Server_Implementation_Memo.md` | **V1.2（本文）** | 实施备忘 |
-| `Bridge_User_Guide.md` | 已交付 | HTTP 网关使用 |
-| `Local LLM Agent Handbook ...` | 已交付 | 智能体原理 |
+| 文件 | 说明 |
+|------|------|
+| `readme.md` | 项目总览 |
+| `MCP_SERVER_DOUBAO_GUIDE.md` | 零基础新手教程 |
+| `Build_Guide.md` | 编译指南 |
+| `Dependency_Installation_Guide.md` | 依赖安装 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | LLM 服务命令行 |
+| `LingoFuse_MCP_Server_Implementation_Memo.md` | **本文档** |
 
 ### 5.4 LM Studio 配置模板
 
@@ -466,8 +566,7 @@ def _eprint(msg: str) -> None:
 }
 ```
 
-搭配 `python mcp_server.py --transport http --host 127.0.0.1 --port 8000`
-先手动启动。
+搭配 `mcp_server.exe --transport http --host 127.0.0.1 --port 8000` 先手动启动。
 
 ---
 
@@ -536,7 +635,7 @@ def _eprint(msg: str) -> None:
 |------|------|-------------------|
 | v2.28 | 稳定（HTTP 模式） | stdio 不可用，但 HTTP 稳定 |
 | v2.37 | 稳定（HTTP 模式 + stdio 直连均不可用） | 只保留 http/sse |
-| **v2.40** | **当前可用版本** | stdio 直连 + proxy + http/sse 全可用 |
+| **v2.42** | **当前可用版本** | stdio 直连 + proxy + http/sse 全可用 |
 
 ### 8.2 紧急恢复
 
@@ -551,14 +650,13 @@ def _eprint(msg: str) -> None:
 |--------------|--------|
 | stdio 直连 → HTTP | 删除 args，加 `"url": "http://127.0.0.1:8000/mcp"` |
 | HTTP → stdio 直连 | 删除 url，加 command + args |
-| stdio 直连 ↔ stdio + proxy | 在 args 前面插入 / 删除 `mcp_proxy.py` + `python.exe` |
+| stdio 直连 ↔ stdio + proxy | 在 args 前面插入 / 删除 `mcp_proxy.exe` + `python.exe` |
 
 ---
 
 ## 九、总结
 
-本次工作（2026‑09‑08 ~ 2026‑09‑10）对 LingoFuse MCP Server 进行了完整的
-生产级适配，涵盖：
+本次工作（2026-09-08 ~ 2026-09-10）对 LingoFuse MCP Server 进行了完整的生产级适配，涵盖：
 
 ### 9.1 已解决的核心问题
 
@@ -579,14 +677,10 @@ def _eprint(msg: str) -> None:
 
 ### 9.2 关键洞察
 
-- **MCP stdio 对启动延迟极度敏感**：客户端从启动子进程到 initialize 握手
-  的有效窗口仅约 5 秒。任何超过 5 秒的启动路径都不可行。
-- **Python 的 `multiprocessing` 在 Windows 上是昂贵操作**：spawn 模式
-  重启整个解释器，对需要加载原生库的进程尤其致命。
-- **C 库的 stdout 输出无法从 Python 层面拦截**：必须通过 `LF_SetOption`
-  在 C 库内部关闭，或在进程外用 proxy 过滤。
-- **类型注解是 FastMCP 生成 JSON Schema 的唯一依据**：任何 `exec` 生成的
-  函数都必须带上准确的类型注解，否则下游客户端会发送空对象。
+- **MCP stdio 对启动延迟极度敏感**：客户端从启动子进程到 initialize 握手的有效窗口仅约 5 秒。任何超过 5 秒的启动路径都不可行。
+- **Python 的 `multiprocessing` 在 Windows 上是昂贵操作**：spawn 模式重启整个解释器，对需要加载原生库的进程尤其致命。
+- **C 库的 stdout 输出无法从 Python 层面拦截**：必须通过 `LF_SetOption` 在 C 库内部关闭，或在进程外用 proxy 过滤。
+- **类型注解是 FastMCP 生成 JSON Schema 的唯一依据**：任何 `exec` 生成的函数都必须带上准确的类型注解，否则下游客户端会发送空对象。
 
 ### 9.3 当前可用状态
 
@@ -597,12 +691,48 @@ def _eprint(msg: str) -> None:
 | **HTTP** | ✅ 可用 | **推荐用于生产** |
 | **SSE** | ✅ 可用（已弃用） | 建议迁移 |
 
-所有交付物已通过实际运行验证，可用于 LM Studio、Claude Desktop 等
-MCP 客户端。后续若需迭代（如进一步压缩启动时间），可基于本版本扩展。
+所有交付物已通过实际运行验证，可用于 LM Studio、Claude Desktop 等 MCP 客户端。后续若需迭代（如进一步压缩启动时间），可基于本版本扩展。
+
+### 图 7：当前可用状态总结
+
+```mermaid
+flowchart LR
+    A["stdio 直连<br/>✅ 4-5 秒"] --> E["🎯 MCP 客户端"]
+    B["stdio + proxy<br/>✅ +0.5 秒"] --> E
+    C["HTTP<br/>✅ 推荐生产"] --> E
+    D["SSE<br/>✅ 已弃用"] --> E
+
+    style A fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style E fill:#1A5490,stroke:#0D2F52,stroke-width:4px,color:#FFFFFF
+```
 
 ---
 
-**文档生成日期**：2026-09-10  
-**上一版本**：V1.1（2026-09-09）  
-**当前版本**：**V1.2**  
-**交付人**：AI 智能体（PassByYou888 / LingoFuse 团队）
+## 十、相关文档（同目录）
+
+| 文档 | 说明 |
+|------|------|
+| `readme.md` | 项目总览与闭环架构 |
+| `MCP_SERVER_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `Build_Guide.md` | 编译指南 |
+| `Dependency_Installation_Guide.md` | 依赖安装 |
+| `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
+
+### 子目录文档
+
+| 文档 | 位置 | 说明 |
+|------|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | `src/llm-service/` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `src/llm-service/` | LLM 服务命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `src/llm-service/` | LLM 代理命令行手册 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | `src/llm-service/` | 踩坑大全 |
+
+---
+
+**文档版本**：V2.0（高对比配色，拆分图表，仅保留同目录链接）  
+**上一版本**：V1.2（2026-09-10）  
+**维护者**：LingoFuse-pasAgent 团队  
+**反馈**：问题提 Issue，急事加 Q（600585）
