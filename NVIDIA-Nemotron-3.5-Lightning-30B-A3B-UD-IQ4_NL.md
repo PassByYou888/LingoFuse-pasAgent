@@ -5,7 +5,7 @@
 > **适用组件**：`llm_service.exe`  
 > **相关文档**（同目录）：
 > - 项目总览与闭环架构：`readme.md`
-> - MCP 新手指南：`mcp_api_tool_DOUBAO_GUIDE.md`
+> - MCP 新手指南：`mcp_api_tool_doubao_guide.md`
 > - 编译指南：`Build_Guide.md`
 > - 依赖安装：`Dependency_Installation_Guide.md`
 > - LLM 服务命令行：`src/LingoFuse_LLM_Service_CLI_guide.md`
@@ -23,7 +23,7 @@
 3. **想部署到 LingoFuse LLM 服务** → 读第四章「部署说明」。
 4. **想了解适用场景** → 读第五章「模型适用场景」。
 
-如果你只想跑通 MCP 闭环，可先按 `mcp_api_tool_DOUBAO_GUIDE.md` 操作，模型下载部分参考本文档第三章。
+如果你只想跑通 MCP 闭环，可先按 `mcp_api_tool_doubao_guide.md` 操作，模型下载部分参考本文档第三章。
 
 **本次更新（V2.1）** 修正内容：
 - 4.2 节启动命令示例中的 `llm_service_cpu.exe` / `llm_service_cu124.exe` 修正为 `llm_service.exe`（本项目仅有一个 `llm_service.exe`；CPU/CUDA 支持由所安装的 `llama-cpp-python` wheel 决定，而不是 exe 文件名）。
@@ -387,7 +387,7 @@ flowchart LR
 | 文档 | 说明 |
 |------|------|
 | `readme.md` | 项目总览与闭环架构 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 | `Build_Guide.md` | 编译指南 |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
 | `Qwen2.5-7B-Instruct-Q4_K_M.md` | 旧版入门模型（仅历史参考） |
