@@ -5,7 +5,7 @@
 > **状态**：⚠️ **历史参考文档** —— 已不再作为默认模型  
 > **相关文档**（同目录）：
 > - 项目总览与闭环架构：`readme.md`
-> - MCP 新手指南：`mcp_api_tool_DOUBAO_GUIDE.md`
+> - MCP 新手指南：`mcp_api_tool_doubao_guide.md`
 > - **推荐模型**：`NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`
 > - 编译指南：`Build_Guide.md`
 > - 依赖安装：`Dependency_Installation_Guide.md`
@@ -297,7 +297,7 @@ flowchart LR
 | 文档 | 说明 |
 |------|------|
 | `readme.md` | 项目总览与闭环架构 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | **推荐模型**下载与部署 |
 | `Build_Guide.md` | 编译指南 |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
