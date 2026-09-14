@@ -1,171 +1,185 @@
 # LingoFuse 与 LingoFuse-pasAgent 迁移与工作总结报告
 
-**报告日期**：2026-09-10  
-**涵盖周期**：2026-08-31 ~ 2026-09-10  
-**项目范围**：LingoFuse 分布式 RPC 框架 + LingoFuse-pasAgent 智能体技术体系  
-**项目仓库**：
-- LingoFuse：[https://github.com/PassByYou888/LingoFuse](https://github.com/PassByYou888/LingoFuse)
-- LingoFuse-pasAgent：[https://github.com/PassByYou888/LingoFuse-pasAgent](https://github.com/PassByYou888/LingoFuse-pasAgent)
-
-**报告人**：AI 智能体（协助 PassByYou888）
-
----
-
-## 目录
-
-1. [项目概述](#1-项目概述)
-2. [整体架构与数据流](#2-整体架构与数据流)
-3. [工作里程碑](#3-工作里程碑)
-4. [LingoFuse 核心框架改造](#4-lingofuse-核心框架改造)
-5. [Python 绑定迁移与迭代](#5-python-绑定迁移与迭代)
-6. [Pascal 工具链重构](#6-pascal-工具链重构)
-7. [LingoFuse-pasAgent 智能体体系建设](#7-lingofuse-pasagent-智能体体系建设)
-8. [关键问题与解决方案汇总](#8-关键问题与解决方案汇总)
-9. [交付物清单](#9-交付物清单)
-10. [验证结果与测试](#10-验证结果与测试)
-11. [后续建议与未完成项](#11-后续建议与未完成项)
-12. [总结](#12-总结)
+> **文档版本**：V2.0  
+> **最后更新**：2026-09-14  
+> **涵盖周期**：2026-08-31 ~ 2026-09-10（原始工作） / 2026-09-14（文档更新）  
+> **状态**：📜 **历史参考文档** —— 记录迁移与重构过程  
+> **相关文档**（同目录）：
+> - 项目总览：`readme.md`
+> - MCP 实施备忘：`LingoFuse_MCP_Server_Implementation_Memo.md`
+> - LLM 工具链总结（子目录）：`src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`
+> - 生态体系总览（子目录）：`src/llm-service/LingoFuse_LLM_Ecosystem_User_Guide.md`
 
 ---
 
-## 1. 项目概述
+## 阅读引导
+
+本文档是 **2026-08-31 ~ 2026-09-10** 期间 LingoFuse 与 LingoFuse-pasAgent 两条主线迁移与重构的历史记录。建议按以下顺序阅读：
+
+1. **想了解做了什么** → 读第一章「项目概述」和第三章「工作里程碑」。
+2. **想了解核心框架改造** → 读第四章。
+3. **想了解 Python 绑定迁移** → 读第五章。
+4. **想了解 Pascal 工具链重构** → 读第六章。
+5. **想了解 pasAgent 体系建设** → 读第七章。
+6. **想了解遗留问题** → 读第十一章。
+
+> **注意**：本文档为**历史参考**。最新的 LLM 工具链演进请查阅 `src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`（v4.0）。
+
+---
+
+## 一、项目概述
 
 本报告整合了 **LingoFuse 核心框架** 与 **LingoFuse-pasAgent 智能体技术体系** 两条主线的迁移改造与质量提升工作。二者关系如下：
 
+### 图 1：项目层次关系
+
 ```mermaid
-graph TB
-    subgraph Core["LingoFuse 核心框架（底层）"]
-        C4["C4 分布式服务网格"]
-        Binding["跨语言绑定<br/>Python / Pascal / ..."]
-        Bridge["HTTP 桥接网关"]
+flowchart TB
+    subgraph CORE["🔵 LingoFuse 核心框架（底层）"]
+        C1["C4 分布式服务网格"]
+        C2["跨语言绑定<br/>Python / Pascal"]
+        C3["HTTP 桥接网关"]
     end
 
-    subgraph Agent["LingoFuse-pasAgent（上层）"]
-        PasBackend["Pascal 智能体服务端"]
-        MCPGateway["MCP 协议网关"]
-        CodeGen["代码生成器"]
-        LLMService["LLM 流式服务"]
+    subgraph AGENT["🟣 LingoFuse-pasAgent（上层）"]
+        A1["Pascal 智能体服务端"]
+        A2["MCP 协议网关"]
+        A3["代码生成器"]
+        A4["LLM 流式服务"]
     end
 
-    Core --> Agent
-    C4 -.->|服务发现 & 路由| PasBackend
-    Binding -.->|数据序列化| PasBackend
-    Bridge -.->|HTTP 接入| MCPGateway
+    CORE --> AGENT
+    C1 -.->|"服务发现与路由"| A1
+    C2 -.->|"数据序列化"| A1
+    C3 -.->|"HTTP 接入"| A2
 
-    style Core fill:#e1f5ff
-    style Agent fill:#fff4e1
+    style CORE fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style AGENT fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style C1 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style C2 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style C3 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A1 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style A2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style A3 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style A4 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
 ```
 
-**两条主线的定位**：
+### 两条主线的定位
 
 | 项目 | 定位 | 核心用户 |
 |------|------|----------|
 | **LingoFuse** | 通用分布式 RPC 基础设施 | 有跨语言/分布式开发需求的程序员 |
 | **LingoFuse-pasAgent** | 面向 AI/MCP 的 Pascal 智能体解决方案 | 持有 Pascal 存量代码、有 AI 集成诉求的开发者 |
 
-**本次工作覆盖的核心议题**：
+### 本次工作覆盖的核心议题
 
 1. **LingoFuse 框架**：LLM 服务多会话重构、Python 绑定 v2.0→v2.1 迁移、Pascal 工具链重构。
 2. **LingoFuse-pasAgent 体系**：MCP Server 打包适配、传输协议升级、缓存一致性与离线检测修复、文档体系建设、预编译包发布。
 
 ---
 
-## 2. 整体架构与数据流
+## 二、整体架构与数据流
 
 ### 2.1 LingoFuse 核心架构
 
 ```mermaid
 flowchart TB
-    subgraph Clients["客户端生态"]
-        Py["Python"]
-        Pas["Pascal"]
-        Web["浏览器 / Node / PHP"]
+    subgraph CLIENTS["🌐 客户端生态"]
+        Py["🐍 Python"]
+        Pas["🅿️ Pascal"]
+        Web["🌐 浏览器 / Node / PHP"]
     end
 
-    subgraph Gateway["HTTP 桥接层"]
+    subgraph GATEWAY["🌉 HTTP 桥接层"]
         Flask["bridge.py<br/>纯二进制转发"]
     end
 
-    subgraph Core["LingoFuse 核心"]
-        C4Grid["C4 分布式服务网格"]
-        Discovery["自动服务发现"]
+    subgraph CORE["⚡ LingoFuse 核心"]
+        C4["C4 分布式服务网格"]
+        Discover["自动服务发现"]
         LB["负载均衡"]
         Seq["Sequenced Notify FIFO"]
     end
 
-    subgraph Nodes["服务节点"]
+    subgraph NODES["📦 服务节点"]
         PyNode["Python 函数"]
         PasNode["Pascal 函数"]
     end
 
-    Py -->|原生 FFI| Core
-    Pas -->|原生 FFI| Core
-    Web -->|HTTP POST| Flask
-    Flask -->|C ABI| Core
-    Core --> Nodes
-    Discovery -.-> LB
-    LB -.-> C4Grid
-    Seq -.-> C4Grid
+    Py -->|"原生 FFI"| CORE
+    Pas -->|"原生 FFI"| CORE
+    Web -->|"HTTP POST"| GATEWAY
+    Flask -->|"C ABI"| CORE
+    CORE --> NODES
+    Discover -.-> LB
+    LB -.-> C4
+    Seq -.-> C4
+
+    style CLIENTS fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style GATEWAY fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style CORE fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style NODES fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style Py fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Pas fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Web fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Flask fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style C4 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style Discover fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style LB fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style Seq fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style PyNode fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style PasNode fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
 ```
 
 ### 2.2 LingoFuse-pasAgent 工作流
 
 ```mermaid
-graph LR
-    User[用户] -->|提问| AI["AI 客户端<br/>LM Studio / Claude / 豆包"]
-    AI -->|MCP 协议| MCP["mcp_server"]
-    MCP -->|Call API| Beacon["pascal_agent_service<br/>信标"]
+flowchart LR
+    User["👤 用户"] -->|"提问"| AI["🤖 AI 客户端"]
+    AI -->|"MCP 协议"| MCP["🌉 mcp_server"]
+    MCP -->|"Call API"| Beacon["📡 信标"]
 
-    subgraph ToolProviders["工具提供者"]
-        ApiTool["pascal_agent_api"]
-        CustomTool["你的工具提供者"]
+    subgraph TOOLS["📦 工具提供者"]
+        A1["pascal_agent_api"]
+        A2["你的工具提供者"]
     end
 
-    Beacon -.->|工具注册| ApiTool
-    Beacon -.->|工具注册| CustomTool
-    CustomTool -->|执行 Pascal 代码| Result[结果]
+    Beacon -.->|"工具注册"| A1
+    Beacon -.->|"工具注册"| A2
+    A2 -->|"执行 Pascal 代码"| Result["✅ 结果"]
     Result -.-> MCP
     MCP -.-> AI
-    AI -.->|回答| User
+    AI -.->|"回答"| User
 
-    style Beacon fill:#fff4e1
-    style CustomTool fill:#e1ffe1
+    style User fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style AI fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style MCP fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style Beacon fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style TOOLS fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style A2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style Result fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
 ```
 
 ### 2.3 代码生成器数据流
 
 ```mermaid
 flowchart LR
-    subgraph Input["输入层"]
-        L0["Layer 0<br/>原始 Pascal 源码"]
-    end
+    A["📄 Layer 0<br/>原始源码"] --> B["📋 Layer 1<br/>声明体"]
+    B --> C["📋 Layer 2<br/>LV0 JSON"]
+    C --> D["📋 Layer 3<br/>LV1 模型 JSON"]
+    D --> E["📄 Layer 4<br/>工具提供者单元"]
 
-    subgraph Parse["解析层"]
-        L1["Layer 1<br/>Pascal 声明体"]
-        L2["Layer 2<br/>LV0 声明 JSON"]
-    end
-
-    subgraph Model["建模层"]
-        L3["Layer 3<br/>LV1 模型 JSON"]
-    end
-
-    subgraph Generate["生成层"]
-        L4["Layer 4<br/>工具提供者单元"]
-    end
-
-    L0 --> L1
-    L1 <--> L2
-    L2 --> L3
-    L3 --> L4
-
-    style L2 fill:#e1f5ff
-    style L3 fill:#fff4e1
-    style L4 fill:#e1ffe1
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style D fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
 ---
 
-## 3. 工作里程碑
+## 三、工作里程碑
 
 ```mermaid
 gantt
@@ -173,7 +187,7 @@ gantt
     dateFormat YYYY-MM-DD
     section LingoFuse 框架
     LLM 多会话重构           :done, a1, 2026-08-31, 3d
-    Python 绑定 v2.0→v2.1    :done, a2, 2026-08-31, 2d
+    Python 绑定 v2.0 到 v2.1  :done, a2, 2026-08-31, 2d
     核心库代码审查           :done, a3, 2026-09-01, 4d
     section Pascal 工具链
     解析器重构               :done, b1, 2026-09-01, 3d
@@ -181,7 +195,7 @@ gantt
     代码生成器模块化         :done, b3, 2026-09-03, 3d
     section pasAgent 体系
     MCP Server 打包适配      :done, c1, 2026-09-08, 1d
-    传输协议升级 SSE→HTTP    :done, c2, 2026-09-08, 1d
+    传输协议升级 SSE 到 HTTP :done, c2, 2026-09-08, 1d
     缓存一致性修复           :done, c3, 2026-09-09, 1d
     离线检测修复             :done, c4, 2026-09-09, 1d
     文档与预编译包           :done, c5, 2026-09-09, 1d
@@ -189,7 +203,7 @@ gantt
 
 ---
 
-## 4. LingoFuse 核心框架改造
+## 四、LingoFuse 核心框架改造
 
 ### 4.1 LLM 服务多会话动态路由重构
 
@@ -206,16 +220,16 @@ gantt
 | **客户端 App 名称** | 固定写死 | 连接成功后 `generate_app_name()` 动态生成 |
 | **客户端连接顺序** | 先生成名称再连接 | `PrepareClient(nil)` → `PrepareDone` → 生成名称 → `BindApp` |
 | **客户端选项** | 未显式设置 | `Wait_Connection_ReadyOk = True` |
-| **Pascal 客户端错误处理** | `raise Exception` | 静默处理，返回 `(Result, ErrorMsg)`，解析 `{code, error}` |
+| **Pascal 客户端错误处理** | `raise Exception` | 静默处理，返回 `(Result, ErrorMsg)` |
 | **请求参数** | 仅 `content` + `prompt` | 增加 `client_name` 字段 |
 
-**架构演进序列图**：
+### 图 2：架构演进序列
 
 ```mermaid
 sequenceDiagram
-    participant Client as Dynamic Client
-    participant C4 as C4 Service Mesh
-    participant Service as LLM Service
+    participant Client as 动态客户端
+    participant C4 as C4 服务网格
+    participant Service as LLM 服务
 
     Client->>C4: LF_PrepareClient(endpoint, nil)
     Client->>Client: LF_PrepareDone() 阻塞等待
@@ -228,27 +242,35 @@ sequenceDiagram
     loop 流式生成
         Service->>Client: LF_Sequenced_Notify(client_name, llm_stream, {chunk})
     end
-    Service->>Client: 发送 __FINISH__
+    Service->>Client: 发送 finish
 ```
 
 ### 4.2 HTTP 桥接器升级（v2.1）
 
 **核心变更**：从 JSON 解析模式进化为**纯二进制转发**模式。
 
+### 图 3：HTTP 桥接器模式对比
+
 ```mermaid
-flowchart LR
-    subgraph Old["v2.0 旧模式"]
-        OldReq["HTTP 请求 JSON"] --> OldParse["解析 JSON<br/>提取参数"]
-        OldParse --> OldCall["LingoFuse Call"]
+flowchart TB
+    subgraph OLD["❌ v2.0 旧模式"]
+        O1["HTTP 请求 JSON"] --> O2["解析 JSON<br/>提取参数"]
+        O2 --> O3["LingoFuse Call"]
     end
 
-    subgraph New["v2.1 新模式"]
-        NewReq["HTTP 请求（任意二进制）"] --> NewPath["仅解析 URL 路径<br/>提取 app/api"]
-        NewPath --> NewCall["原样转发<br/>LingoFuse Call"]
+    subgraph NEW["✅ v2.1 新模式"]
+        N1["HTTP 请求（任意二进制）"] --> N2["仅解析 URL 路径<br/>提取 app/api"]
+        N2 --> N3["原样转发<br/>LingoFuse Call"]
     end
 
-    style Old fill:#ffe1e1
-    style New fill:#e1ffe1
+    style OLD fill:#FADBD8,stroke:#922B21,stroke-width:3px,color:#5A1A14
+    style NEW fill:#D5F5E3,stroke:#1E8449,stroke-width:3px,color:#0E4D2A
+    style O1 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style O2 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style O3 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style N1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style N2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style N3 fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
 ```
 
 **关键改动**：
@@ -261,7 +283,7 @@ flowchart LR
 
 ---
 
-## 5. Python 绑定迁移与迭代
+## 五、Python 绑定迁移与迭代
 
 ### 5.1 版本演进
 
@@ -273,8 +295,8 @@ timeline
         HTTP 网关 : 支持 json/path 双模式
     section v2.1 (2026-08-31)
         纯二进制转发 : 提升通用性与性能
-        容错读取 : 兼容无 \0 结尾数据
-        统一 \0 处理 : 跨语言一致性
+        容错读取 : 兼容无 \\0 结尾数据
+        统一 \\0 处理 : 跨语言一致性
         文档大更新 : 新增 Bridge_User_Guide.md
 ```
 
@@ -297,44 +319,47 @@ stateDiagram-v2
     Attached --> Detached: LF_FreeApp<br/>（不销毁，仅分离）
     Detached --> Destroyed: LF_Shutdown<br/>（统一清理全局池）
     Destroyed --> [*]
-
-    note right of Detached
-        App 仍留在全局池中
-        防止网络广播悬空指针
-    end note
 ```
 
 ---
 
-## 6. Pascal 工具链重构
+## 六、Pascal 工具链重构
 
-Pascal 工具链涉及三个核心单元：底层解析器 `Z.Pascal_Func_Tool.pas`、中间模型 `pascal_func_model.pas` 和代码生成器 `pas_mcp_generator_tool.pas`。
+Pascal 工具链涉及三个核心单元：底层解析器、中间模型和代码生成器。
 
 ### 6.1 解析器重构
 
+### 图 4：解析器重构对比
+
 ```mermaid
-graph TB
-    subgraph Before["重构前"]
+flowchart LR
+    subgraph BEFORE["❌ 重构前"]
         B1["FuncList: 104 条目<br/>（含结构标记）"]
         B2["ParseSuccess 基于结构指针"]
         B3["内存泄漏：失败路径未释放"]
     end
 
-    subgraph After["重构后"]
+    subgraph AFTER["✅ 重构后"]
         A1["FuncList: 51 条目<br/>（仅 IsProc=True）"]
         A2["ParseSuccess 基于三标志"]
         A3["添加 Free/Dispose"]
     end
 
-    Before ==>|重构| After
-
-    style Before fill:#ffe1e1
-    style After fill:#e1ffe1
+    style BEFORE fill:#FADBD8,stroke:#922B21,stroke-width:3px,color:#5A1A14
+    style AFTER fill:#D5F5E3,stroke:#1E8449,stroke-width:3px,color:#0E4D2A
+    style B1 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style B2 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style B3 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style A1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A3 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
 ```
 
 ### 6.2 中间模型深拷贝修复
 
 **问题根因**（浅拷贝 + 动态数组共享）：
+
+### 图 5：浅拷贝问题
 
 ```mermaid
 sequenceDiagram
@@ -368,19 +393,12 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    subgraph Input["原始类型"]
-        I1["Integer / Int64 / Cardinal"]
-        I2["Double / Single / Extended"]
-        I3["string / AnsiString / UnicodeString"]
-    end
+    A["原始类型<br/>Integer / Int64 / Cardinal<br/>Double / Single / Extended<br/>string / AnsiString / UnicodeString"] --> B["NormalizeType()"]
+    B --> C["归一化类型<br/>Int64<br/>Double<br/>string"]
 
-    subgraph Output["归一化类型"]
-        O1["Int64"]
-        O2["Double"]
-        O3["string"]
-    end
-
-    Input --> Normalize["NormalizeType()"] --> Output
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
 ```
 
 ### 6.4 代码生成器模块化
@@ -391,7 +409,7 @@ flowchart LR
 
 ```mermaid
 mindmap
-  root((pas_mcp_generator_tool))
+  root(("pas_mcp_generator_tool"))
     head_lines
       程序头部
       编译器指令
@@ -413,7 +431,7 @@ mindmap
 
 ---
 
-## 7. LingoFuse-pasAgent 智能体体系建设
+## 七、LingoFuse-pasAgent 智能体体系建设
 
 ### 7.1 MCP Server 打包适配
 
@@ -425,20 +443,16 @@ mindmap
 
 ### 7.2 传输协议升级
 
+### 图 6：传输协议演进
+
 ```mermaid
 flowchart LR
-    subgraph Legacy["旧模式（已弃用）"]
-        SSE["SSE 传输<br/>/sse 端点"]
-    end
+    A["🔴 SSE<br/>已弃用"] -.->|"官方弃用"| B["🟢 Streamable HTTP<br/>推荐"]
+    B --> C["/mcp 端点"]
 
-    subgraph Modern["新模式（推荐）"]
-        HTTP["Streamable HTTP<br/>/mcp 端点"]
-    end
-
-    Legacy -.->|官方弃用| Modern
-
-    style Legacy fill:#ffe1e1
-    style Modern fill:#e1ffe1
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
 ```
 
 **改动要点**：
@@ -455,24 +469,6 @@ flowchart LR
 - 后端工具离线时，`agent_main` 正确跳过不可用工具。
 - 但 `mcp_server` 的 `refresh_monitor` 仍显示旧工具列表。
 - 重启子进程后问题依旧。
-
-**根本原因分析**：
-
-```mermaid
-graph TB
-    subgraph Race["竞态污染"]
-        Reg["register_agent 回调<br/>_reg_tool_callback"]
-        Fetch["_fetch_tools_from_backend"]
-        Cache["self._tools 缓存"]
-    end
-
-    Reg -->|无条件写入| Cache
-    Fetch -->|先清空再填充| Cache
-    Note["异步执行，register_agent<br/>可能在覆盖后再次触发"]
-
-    style Reg fill:#ffe1e1
-    style Cache fill:#fff4e1
-```
 
 **解决方案（v7.2）**：
 
@@ -520,14 +516,9 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 **修复**：在 `call_tool` 中使用 `json.dumps(arguments, ensure_ascii=False).encode('utf-8')`。
 
-### 7.7 仓库信息优化
-
-- **Description**：`Industrial-grade Pascal Agent tech stack: expose your Pascal functions as AI tools via MCP protocol. Pre-built EXEs included – no Python/FPC required for end users.`
-- **Topics**：`pascal`、`mcp`、`model-context-protocol`、`agent`、`llm`、`rpc`、`lingofuse`、`ai-tools`、`function-calling`、`industrial-automation`、`code-generation`、`cross-language`。
-
 ---
 
-## 8. 关键问题与解决方案汇总
+## 八、关键问题与解决方案汇总
 
 | 问题 | 影响范围 | 根因 | 解决方案 |
 |------|----------|------|----------|
@@ -554,7 +545,7 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 ---
 
-## 9. 交付物清单
+## 九、交付物清单
 
 ### 9.1 LingoFuse 核心框架
 
@@ -566,7 +557,7 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 | `Z.LingoFuse_Export.pas` | Pascal | 更新 `LF_FreeApp` / `LF_Shutdown` 注释 |
 | `Z.LingoFuse_Core.pas` | Pascal | 确认全局池机制 |
 | `LingoFuseBenchServer.lpr` | Pascal | 修正资源释放顺序 |
-| `core.py`, `client.py`, `server.py`, `bridge.py`, `__init__.py` | Python | 绑定更新（生命周期、日志、预检、二进制转发） |
+| `core.py`, `client.py`, `server.py`, `bridge.py`, `__init__.py` | Python | 绑定更新 |
 | `test_lingofuse.py` | Python | 新增测试用例，修复导入错误 |
 | `Z.Pascal_Func_Tool.pas` | Pascal | 解析器重构 |
 | `pascal_func_model.pas` | Pascal | 深拷贝修复，跳过报告，类型归一化增强 |
@@ -577,29 +568,27 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 | 文件 | 版本 | 说明 |
 |------|------|------|
-| `mcp_server.py` | v2.28 | MCP 网关，自动刷新逻辑稳定 |
-| `language_middleware.py` | **v7.2** | 修复缓存污染，日志英文化 |
-| `generate_agent_json.py` | v2.0 | 配置生成器（stdio/http/sse + proxy） |
-| `mcp_proxy.py` | v1.0 | stdio 通信代理 |
+| `mcp_server.py` | v2.42 | MCP 网关，自动刷新逻辑稳定 |
+| `language_middleware.py` | **v7.3** | 修复缓存污染，日志英文化 |
+| `generate_agent_json.py` | v2.5 | 配置生成器（stdio/http/sse + proxy） |
+| `mcp_proxy.py` | v2.5 | stdio 通信代理 |
 | `cross_bridge.py` | — | 重构为依赖 `bridge.py` 子进程 |
 | `build_mcp_server.ps1` | 新增 | PyInstaller 打包脚本 |
 | `build_pascal_agent.bat` | 新增 | Lazarus 一键编译脚本 |
 | `Z.Net.C4.LingoFuse.pas` | 建议补丁 | 增加离线检查 |
 
-### 9.3 文档体系（8 份）
+### 9.3 文档体系
 
 | 文档 | 状态 | 面向对象 |
 |------|------|----------|
 | `readme.md` | 已重写 | 全体用户 |
 | `MCP_SERVER_DOUBAO_GUIDE.md` | 已交付 | 零基础新手 |
-| `Build_Guide.md` | V2.0 | 需要编译的开发者 |
-| `Dependency_Installation_Guide.md` | V2.0 | 依赖安装的开发者 |
-| `Qwen2.5-7B-Instruct-Q4_K_M.md` | 已交付 | 想跑本地 LLM 的用户 |
-| `LingoFuse_LLM_Service_guide.md` | V1.0 | 部署 LLM 服务的用户 |
-| `pascal_code_rule.md` | V3.0 | Pascal 工具开发者 |
-| `LingoFuse_MCP_Server_Implementation_Memo.md` | V1.1 | 想了解内部实现的开发者 |
-| `Bridge_User_Guide.md` | 已交付 | HTTP 网关使用者 |
-| `Local LLM Agent Handbook CPU First, GPU Optional.md` | 已交付 | 想理解智能体原理的读者 |
+| `Build_Guide.md` | V3.0 | 需要编译的开发者 |
+| `Dependency_Installation_Guide.md` | V3.0 | 依赖安装的开发者 |
+| `Qwen2.5-7B-Instruct-Q4_K_M.md` | 已更新（历史参考） | 想跑本地 LLM 的用户 |
+| `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | V2.0 | 推荐模型下载与部署 |
+| `LingoFuse_LLM_Service_guide.md` | 已废弃 | 已迁移到子目录 |
+| `LingoFuse_MCP_Server_Implementation_Memo.md` | V2.0 | 想了解内部实现的开发者 |
 
 ### 9.4 发布物
 
@@ -608,22 +597,22 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 ---
 
-## 10. 验证结果与测试
+## 十、验证结果与测试
 
 ### 10.1 LLM 服务
 
 ```mermaid
-graph LR
-    A["客户端生成唯一名称"] -->|✅| B["服务端解析 client_name"]
-    B -->|✅| C["流式通知完整送达"]
-    C -->|✅| D["多会话并发互不干扰"]
-    D -->|✅| E["--quiet 生效"]
+flowchart LR
+    A["客户端生成唯一名称"] -->|"✅"| B["服务端解析 client_name"]
+    B -->|"✅"| C["流式通知完整送达"]
+    C -->|"✅"| D["多会话并发互不干扰"]
+    D -->|"✅"| E["--quiet 生效"]
 
-    style A fill:#e1ffe1
-    style B fill:#e1ffe1
-    style C fill:#e1ffe1
-    style D fill:#e1ffe1
-    style E fill:#e1ffe1
+    style A fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style B fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style C fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style D fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style E fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
 ```
 
 ### 10.2 Python 绑定
@@ -662,14 +651,14 @@ graph LR
 
 ---
 
-## 11. 后续建议与未完成项
+## 十一、后续建议与未完成项
 
 ### 11.1 LingoFuse 框架
 
 | 建议 | 优先级 | 说明 |
 |------|--------|------|
 | 服务端并发限流（`--max-sessions`） | 中 | 防止 GPU 显存溢出 |
-| 客户端存活探测 | 中 | 服务端定期检查目标 App 在线，主动终止离线会话的生成线程 |
+| 客户端存活探测 | 中 | 服务端定期检查目标 App 在线 |
 | 断线重连 | 低 | 客户端断开后自动重连 |
 | `bridge.py` 支持二进制模式（`--binary-mode`） | 高 | 避免 `\0` 损坏二进制数据 |
 | `DataHandle` 提供 `write_bytes` 方法 | 中 | 明确区分文本和二进制 |
@@ -707,35 +696,37 @@ graph LR
 
 ---
 
-## 12. 总结
+## 十二、总结
 
 本次工作对 **LingoFuse 核心框架** 与 **LingoFuse-pasAgent 智能体技术体系** 进行了深度且系统的改造与修复，取得了以下里程碑成果：
 
+### 图 7：工作成果总览
+
 ```mermaid
 mindmap
-  root((工作成果))
+  root(("工作成果"))
     架构升级
       LLM 服务多会话动态路由
       HTTP 桥接器纯二进制转发
-      传输协议 SSE→Streamable HTTP
+      传输协议 SSE 到 Streamable HTTP
     质量提升
-      修复 20+ 处缺陷
+      修复 20 处以上缺陷
       消除内存泄漏
       统一资源生命周期
     可观测性增强
       统一日志系统
-      调试模式 & 文件日志
+      调试模式和文件日志
       跳过报告机制
     工具链现代化
-      解析器输出精简 104→51
-      生成代码翻倍 603→1742
+      解析器输出精简 104 到 51
+      生成代码翻倍 603 到 1742
       模块化重构
     用户体验
       预编译包发布
       保姆级教程
       中文显示修复
     生态建设
-      8+ 份技术文档
+      8 份以上技术文档
       仓库信息优化
       MIT 开源承诺
 ```
@@ -753,6 +744,33 @@ mindmap
 
 ---
 
-**报告结束**
+## 十三、相关文档（同目录）
 
-*感谢 PassByYou888 的信任与协作。*
+| 文档 | 说明 |
+|------|------|
+| `readme.md` | 项目总览与闭环架构 |
+| `MCP_SERVER_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `LingoFuse_MCP_Server_Implementation_Memo.md` | MCP 网关实施备忘 |
+| `Build_Guide.md` | 编译指南 |
+| `Dependency_Installation_Guide.md` | 依赖安装 |
+| `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
+
+### 子目录文档
+
+| 文档 | 位置 | 说明 |
+|------|------|------|
+| `LingoFuse_LLM_Service_Work_Summary.md` | `src/llm-service/` | **最新** LLM 工具链版本演进总结 |
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | `src/llm-service/` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `src/llm-service/` | LLM 服务命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `src/llm-service/` | LLM 代理命令行手册 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | `src/llm-service/` | 踩坑大全 |
+
+---
+
+**文档版本**：V2.0（历史参考，高对比配色）  
+**维护者**：LingoFuse-pasAgent 团队  
+**反馈**：问题提 Issue，急事加 Q（600585）
+
+---
+
+*本报告为历史参考文档，最新的 LLM 工具链演进请查阅 `src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`（v4.0）。*
