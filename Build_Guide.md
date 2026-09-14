@@ -5,7 +5,7 @@
 > **适用平台**：Windows 10/11（64 位）  
 > **相关文档**（同目录）：
 > - 依赖安装：`Dependency_Installation_Guide.md`
-> - MCP 新手指南：`mcp_api_tool_DOUBAO_GUIDE.md`
+> - MCP 新手指南：`mcp_api_tool_doubao_guide.md`
 > - LLM 服务命令行：`src/LingoFuse_LLM_Service_CLI_guide.md`
 > - LLM 代理命令行：`src/LingoFuse_LLM_Proxy_CLI_Guide.md`
 > - 生态体系总览：`src/LingoFuse_LLM_Ecosystem_User_Guide.md`
@@ -22,7 +22,7 @@
 4. **想了解动态库部署** → 读第六章。
 5. **遇到问题** → 读第七章「常见问题」。
 
-如果你只是想**运行**预编译包而不想自己编译，请直接下载预编译包并按 `mcp_api_tool_DOUBAO_GUIDE.md` 操作。
+如果你只是想**运行**预编译包而不想自己编译，请直接下载预编译包并按 `mcp_api_tool_doubao_guide.md` 操作。
 
 **本次更新（V4.1）** 修正内容：
 - 1.3 节目录树中「`pascal_agent_api_ref_json.md`」补充到 `src/` 文件列表（此前遗漏）。
@@ -82,7 +82,7 @@ LingoFuse-pasAgent\
 ├── readme.md
 ├── Build_Guide.md                  ← 本文档
 ├── Dependency_Installation_Guide.md
-├── mcp_api_tool_DOUBAO_GUIDE.md
+├── mcp_api_tool_doubao_guide.md
 ├── NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md
 ├── code_generate_mcp.md
 ├── pascal_code_mcp_rule.md
@@ -543,7 +543,7 @@ src\dist\
 | 文档 | 说明 |
 |------|------|
 | `Dependency_Installation_Guide.md` | 依赖安装详细步骤 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
 | `code_generate_mcp.md` | 代码生成器使用手册 |
 | `pascal_code_mcp_rule.md` | Pascal 声明规范（解析契约） |
