@@ -1,49 +1,108 @@
 # LingoFuse LLM Proxy 命令行使用手册
 
-> **适用程序**：`llm_proxy`（Linux）/ `llm_proxy.exe`（Windows）  
-> **文档版本**：V2.0  
-> **最后更新**：2026-09-13
+> **适用程序**：`llm_proxy.exe`（Windows）/ `llm_proxy`（Linux）  
+> **文档版本**：V3.0  
+> **最后更新**：2026-09-14  
+> **相关文档**（同目录）：
+> - LLM 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
+> - LLM 服务命令行手册：`LingoFuse_LLM_Service_CLI_guide.md`
+> - 代理兼容性指南：`LingoFuse_LLM_Proxy_Compatibility_Guide.md`
+> - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
+> - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
+> - llama-cpp-python 安装：`llama_cpp_python_guide.md`
 
 ---
 
-## 一、程序启动名
+## 一、程序定位
 
-`llm_proxy` 支持两种部署形态，对应两种启动名：
+`llm_proxy.exe` 是一个 **LingoFuse 服务端**，但它的内部逻辑与 `llm_service.exe` 完全不同：**它不加载模型，只做协议翻译**。
 
-| 平台 | 启动名 | 说明 |
-|------|--------|------|
-| **Windows** | `llm_proxy.exe` | PyInstaller / Nuitka 打包后的可执行文件 |
-| **Linux** | `llm_proxy` | 打包后无扩展名；源码运行时为 `python llm_proxy.py` |
+它把 LingoFuse 的二进制 RPC 翻译成 OpenAI 兼容的 HTTP 请求，转发给任意支持 `/v1/chat/completions` + SSE 流式的后端（LM Studio、Ollama、vLLM、DeepSeek、OpenRouter 等），再把流式响应翻译回 LingoFuse 的 Notify 事件。
 
-**判定规则**：程序启动时自动检测是否被 PyInstaller / Nuitka 打包。若已打包，`--help` 顶部用法行与示例显示当前可执行文件名；若源码运行，则显示 `llm_proxy.py`。
+它是 pasAgent 闭环中 **`llm_service.exe` 的替代方案**：当你不想在本地加载大模型，或者已经部署了 LM Studio / 云端 API 时，用 `llm_proxy.exe` 就能让 AI 客户端拥有“大脑”。
 
-**本文档约定**：
+### 图 1：llm_proxy 在闭环中的位置
 
-- 所有命令示例分 **PowerShell（Windows）** 与 **Shell（Linux）** 两个版本
-- Windows 多行续行使用**反引号** `` ` ``
-- Linux 多行续行使用**反斜杠** `\`
+```mermaid
+flowchart LR
+    A["📡 信标"] --> B["🌉 MCP 网关"]
+    B --> C["🤖 AI 客户端"]
+    C --> D["🌉 LLM 代理<br/>llm_proxy.exe"]
+    D -->|"HTTP SSE"| E["🔌 外部后端<br/>LM Studio / Ollama / 云 API"]
 
-```powershell
-# Windows PowerShell：查看帮助
-llm_proxy.exe --help
+    style A fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style D fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style E fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
 ```
 
-```bash
-# Linux Shell：查看帮助
-./llm_proxy --help
-```
+**运行环境**：Windows / Linux。  
+**依赖**：`LingoFuse64.dll` / `liblingofuse.so`（位于系统 PATH 或 exe 同目录）。
 
 ---
 
-## 二、快速开始
+## 二、llm_service vs llm_proxy：兄弟关系
 
-### 2.1 最小启动
+两者是**兄弟服务端**，共享同一套 Call API 面，但**不能同时运行**（默认共用同一个 endpoint 和 app 名）。
+
+### 图 2：两种服务端对比
+
+```mermaid
+flowchart TB
+    subgraph A["🟢 llm_service.exe"]
+        A1["本地加载 GGUF 模型"]
+        A2["有状态：持有 KV cache"]
+        A3["支持 set_system_message"]
+        A4["需要 20 GB 模型文件"]
+    end
+
+    subgraph B["🟣 llm_proxy.exe"]
+        B1["不加载模型"]
+        B2["无状态：每轮重建 messages"]
+        B3["不支持 set_system_message"]
+        B4["只需一个 OpenAI 兼容后端"]
+    end
+
+    style A fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A3 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A4 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style B1 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style B2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style B3 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style B4 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+```
+
+**能力矩阵对比**：
+
+| API | llm_service.exe | llm_proxy.exe |
+|-----|:---------------:|:-------------:|
+| `generate` | ✅ 1 | ✅ 1 |
+| `create_session` | ✅ 1 | ✅ 1 |
+| `close_session` | ✅ 1 | ✅ 1 |
+| `cancel_session` | ✅ 1 | ✅ 1 |
+| `list_sessions` | ✅ 1 | ✅ 1 |
+| **`set_system_message`** | ✅ **1** | ❌ **0** |
+| `health` | ✅ 1 | ✅ 1 |
+| `llm_stream` | ✅ 1 | ✅ 1 |
+| **`server_kind`** | `"service"` | `"proxy"` |
+
+> **共存规则**：若两者都想运行，**必须**同时改 `--endpoint` 和 `--app-name`。详见场景 8。
+
+---
+
+## 三、快速开始
+
+### 3.1 最小启动
 
 **Windows（PowerShell）**：
 
 ```powershell
 # 使用默认端点 ipc:llm_service 与默认后端 http://127.0.0.1:12345/v1
-llm_proxy.exe
+.\llm_proxy.exe
 ```
 
 **Linux（Shell）**：
@@ -53,12 +112,12 @@ llm_proxy.exe
 ./llm_proxy
 ```
 
-### 2.2 连接 LM Studio 本地服务器
+### 3.2 连接 LM Studio 本地服务器
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
+.\llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
 ```
 
 **Linux（Shell）**：
@@ -67,12 +126,12 @@ llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
 ./llm_proxy --backend-url http://127.0.0.1:1234/v1
 ```
 
-### 2.3 连接 DeepSeek 云 API
+### 3.3 连接 DeepSeek 云 API
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://api.deepseek.com/v1 `
   --backend-key sk-xxxxxxxxxxxxxxxx `
   --backend-model deepseek-chat
@@ -87,7 +146,9 @@ llm_proxy.exe `
   --backend-model deepseek-chat
 ```
 
-启动成功后，会打印一段状态横幅，然后进入监听状态：
+### 图 3：启动后的状态横幅（示例）
+
+启动成功后会打印一段状态横幅，然后进入监听状态：
 
 ```
 ======================================================================
@@ -102,7 +163,7 @@ llm_proxy.exe `
   Backend auth            : Authorization: Bearer <redacted, 9 chars>
   Backend transport       : http.client
   ...
-  Supported APIs          : generate, create_session, ...
+  Supported APIs          : generate, create_session, close_session, ...
   Unsupported APIs        : set_system_message
 ======================================================================
 [INFO] LLM Proxy service 'LLM_Service' running on ipc:llm_service
@@ -111,11 +172,11 @@ llm_proxy.exe `
 
 ---
 
-## 三、在线 API 接入规则（重点）
+## 四、在线 API 接入规则（重点）
 
 `llm_proxy` 对接在线 API 的核心机制是 **OpenAI 兼容协议 + SSE 流式**。任何在线服务，只要满足以下全部条件，即可通过 `--backend-url` 无缝接入。
 
-### 3.1 硬性条件
+### 4.1 硬性条件
 
 | # | 条件 | 说明 |
 |:-:|------|------|
@@ -125,7 +186,31 @@ llm_proxy.exe `
 | 4 | delta 中含 `choices[0].delta.content` 或 `reasoning_content` | 否则解析为空 |
 | 5 | 不强制 gzip 压缩 | 代理已设置 `Accept-Encoding: identity` |
 
-### 3.2 认证规则
+### 图 4：接入验证流程
+
+```mermaid
+flowchart TB
+    A["候选后端"] --> B{"提供 POST<br/>/v1/chat/completions?"}
+    B -->|否| C["❌ 不支持"]
+    B -->|是| D{"stream=true 返回<br/>text/event-stream?"}
+    D -->|否| C
+    D -->|是| E{"SSE 帧为<br/>data: 带空格?"}
+    E -->|否| F["⚠️ 需调整"]
+    E -->|是| G{"delta 含 content<br/>或 reasoning_content?"}
+    G -->|否| F
+    G -->|是| H["✅ 完全兼容"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style G fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style H fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
+
+### 4.2 认证规则
 
 | 参数 | 作用 | 常见取值 |
 |------|------|----------|
@@ -135,7 +220,7 @@ llm_proxy.exe `
 | `--backend-auth-scheme` | 认证前缀 | `Bearer`（默认）、空字符串（裸 token） |
 | `--backend-extra-headers` | 额外 HTTP 头（JSON） | `{"HTTP-Referer":"..."}` |
 
-### 3.3 Base URL 拼接规则
+### 4.3 Base URL 拼接规则
 
 `--backend-url` 的值必须是**不含 `/chat/completions` 的 base 路径**。代理会在其后自动拼接 `/chat/completions`：
 
@@ -147,155 +232,74 @@ llm_proxy.exe `
 
 **特例**：Azure OpenAI 的路径格式特殊，需要手工拼接 deployment 与 api-version。详见场景 5。
 
-### 3.4 典型在线 API 接入速查
+### 4.4 典型在线 API 接入速查
 
 #### DeepSeek
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.deepseek.com/v1 --backend-key sk-xxx --backend-model deepseek-chat
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.deepseek.com/v1 --backend-key sk-xxx --backend-model deepseek-chat
+.\llm_proxy.exe --backend-url https://api.deepseek.com/v1 --backend-key sk-xxx --backend-model deepseek-chat
 ```
 
 #### 硅基流动 (SiliconFlow)
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.siliconflow.cn/v1 --backend-key sk-xxx --backend-model deepseek-ai/DeepSeek-V3
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.siliconflow.cn/v1 --backend-key sk-xxx --backend-model deepseek-ai/DeepSeek-V3
+.\llm_proxy.exe --backend-url https://api.siliconflow.cn/v1 --backend-key sk-xxx --backend-model deepseek-ai/DeepSeek-V3
 ```
 
 #### Groq
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.groq.com/openai/v1 --backend-key gsk_xxx --backend-model llama-3.3-70b-versatile
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.groq.com/openai/v1 --backend-key gsk_xxx --backend-model llama-3.3-70b-versatile
+.\llm_proxy.exe --backend-url https://api.groq.com/openai/v1 --backend-key gsk_xxx --backend-model llama-3.3-70b-versatile
 ```
 
 #### OpenRouter
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://openrouter.ai/api/v1 `
   --backend-key sk-or-xxx `
   --backend-extra-headers '{\"HTTP-Referer\":\"https://example.com\"}'
 ```
 
-**Linux（Shell）**：
-
-```bash
-./llm_proxy \
-  --backend-url https://openrouter.ai/api/v1 \
-  --backend-key sk-or-xxx \
-  --backend-extra-headers '{"HTTP-Referer":"https://example.com"}'
-```
-
 #### Together AI
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.together.xyz/v1 --backend-key xxx --backend-model meta-llama/Llama-3.3-70B-Instruct-Turbo
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.together.xyz/v1 --backend-key xxx --backend-model meta-llama/Llama-3.3-70B-Instruct-Turbo
+.\llm_proxy.exe --backend-url https://api.together.xyz/v1 --backend-key xxx --backend-model meta-llama/Llama-3.3-70B-Instruct-Turbo
 ```
 
 #### 智谱 GLM
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://open.bigmodel.cn/api/paas/v4 --backend-key xxx --backend-model glm-4-plus
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://open.bigmodel.cn/api/paas/v4 --backend-key xxx --backend-model glm-4-plus
+.\llm_proxy.exe --backend-url https://open.bigmodel.cn/api/paas/v4 --backend-key xxx --backend-model glm-4-plus
 ```
 
 #### Moonshot (Kimi)
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.moonshot.cn/v1 --backend-key sk-xxx --backend-model moonshot-v1-8k
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.moonshot.cn/v1 --backend-key sk-xxx --backend-model moonshot-v1-8k
+.\llm_proxy.exe --backend-url https://api.moonshot.cn/v1 --backend-key sk-xxx --backend-model moonshot-v1-8k
 ```
 
 #### Fireworks AI
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.fireworks.ai/inference/v1 --backend-key xxx --backend-model accounts/fireworks/models/llama-v3p3-70b-instruct
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.fireworks.ai/inference/v1 --backend-key xxx --backend-model accounts/fireworks/models/llama-v3p3-70b-instruct
+.\llm_proxy.exe --backend-url https://api.fireworks.ai/inference/v1 --backend-key xxx --backend-model accounts/fireworks/models/llama-v3p3-70b-instruct
 ```
 
 #### Mistral
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.mistral.ai/v1 --backend-key xxx --backend-model mistral-large-latest
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_proxy --backend-url https://api.mistral.ai/v1 --backend-key xxx --backend-model mistral-large-latest
+.\llm_proxy.exe --backend-url https://api.mistral.ai/v1 --backend-key xxx --backend-model mistral-large-latest
 ```
 
 #### xAI Grok
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-url https://api.x.ai/v1 --backend-key xai-xxx --backend-model grok-2-latest
+.\llm_proxy.exe --backend-url https://api.x.ai/v1 --backend-key xai-xxx --backend-model grok-2-latest
 ```
 
-**Linux（Shell）**：
+> **完整清单**：129+ OpenAI 兼容后端清单见同目录 `LingoFuse_LLM_Proxy_Compatibility_Guide.md`。
 
-```bash
-./llm_proxy --backend-url https://api.x.ai/v1 --backend-key xai-xxx --backend-model grok-2-latest
-```
-
-### 3.5 密钥安全建议
+### 4.5 密钥安全建议
 
 推荐使用 `--backend-key-file`，避免密钥出现在命令行历史或进程列表中。
 
@@ -306,7 +310,7 @@ llm_proxy.exe --backend-url https://api.x.ai/v1 --backend-key xai-xxx --backend-
 "sk-xxxxxxxxxxxxxxxx" | Out-File -Encoding utf8 api_key.txt
 
 # 启动代理时从文件读取
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://api.deepseek.com/v1 `
   --backend-key-file ./api_key.txt `
   --backend-model deepseek-chat
@@ -328,9 +332,9 @@ chmod 600 api_key.txt
 
 ---
 
-## 四、参数详解
+## 五、参数详解
 
-### 4.1 LingoFuse 服务参数
+### 5.1 LingoFuse 服务参数
 
 #### `--endpoint ADDRESS`
 
@@ -342,13 +346,13 @@ chmod 600 api_key.txt
 
 ```powershell
 # 同机 IPC（默认）
-llm_proxy.exe --endpoint ipc:llm_service
+.\llm_proxy.exe --endpoint ipc:llm_service
 
 # 跨机 TCP（监听所有网卡）
-llm_proxy.exe --endpoint 0.0.0.0:9898
+.\llm_proxy.exe --endpoint 0.0.0.0:9898
 
 # 换用其他 IPC 名（避免与 llm_service 冲突）
-llm_proxy.exe --endpoint ipc:llm_proxy
+.\llm_proxy.exe --endpoint ipc:llm_proxy
 ```
 
 **Linux（Shell）**：
@@ -374,7 +378,7 @@ llm_proxy.exe --endpoint ipc:llm_proxy
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe --app-name LLM_Proxy --endpoint ipc:llm_proxy
+.\llm_proxy.exe --app-name LLM_Proxy --endpoint ipc:llm_proxy
 ```
 
 **Linux（Shell）**：
@@ -390,7 +394,7 @@ llm_proxy.exe --app-name LLM_Proxy --endpoint ipc:llm_proxy
 - **环境变量**：`LLM_PROXY_NOTIFY_API`
 - **注意**：客户端必须用**同一个名字**注册 Notify 回调才能收到流。除非有特殊需求，一般不改。
 
-### 4.2 后端连接参数
+### 5.2 后端连接参数
 
 #### `--backend-url URL`
 
@@ -403,13 +407,13 @@ llm_proxy.exe --app-name LLM_Proxy --endpoint ipc:llm_proxy
 
 ```powershell
 # 本地 LM Studio
-llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
+.\llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
 
 # 本地 Ollama
-llm_proxy.exe --backend-url http://127.0.0.1:11434/v1
+.\llm_proxy.exe --backend-url http://127.0.0.1:11434/v1
 
 # 云 API
-llm_proxy.exe --backend-url https://api.deepseek.com/v1
+.\llm_proxy.exe --backend-url https://api.deepseek.com/v1
 ```
 
 **Linux（Shell）**：
@@ -436,12 +440,12 @@ llm_proxy.exe --backend-url https://api.deepseek.com/v1
 
 ```powershell
 # 明确指定模型
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url http://127.0.0.1:1234/v1 `
   --backend-model "nvidia-nemotron-3.5-lightning-30b-a3b@q4_k_m"
 
 # 空值即自动发现
-llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
+.\llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
 ```
 
 **Linux（Shell）**：
@@ -466,7 +470,7 @@ llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe --backend-key sk-xxxxxxxxxxxx
+.\llm_proxy.exe --backend-key sk-xxxxxxxxxxxx
 ```
 
 **Linux（Shell）**：
@@ -486,7 +490,7 @@ llm_proxy.exe --backend-key sk-xxxxxxxxxxxx
 
 ```powershell
 "sk-xxxxxxxxxxxx" | Out-File -Encoding utf8 api_key.txt
-llm_proxy.exe --backend-key-file ./api_key.txt
+.\llm_proxy.exe --backend-key-file ./api_key.txt
 ```
 
 **Linux（Shell）**：
@@ -507,7 +511,7 @@ chmod 600 api_key.txt
 
 ```powershell
 # Azure OpenAI 使用 api-key 头
-llm_proxy.exe --backend-auth-header api-key
+.\llm_proxy.exe --backend-auth-header api-key
 ```
 
 **Linux（Shell）**：
@@ -527,10 +531,10 @@ llm_proxy.exe --backend-auth-header api-key
 
 ```powershell
 # 标准 Bearer（默认）
-llm_proxy.exe --backend-auth-scheme "Bearer"
+.\llm_proxy.exe --backend-auth-scheme "Bearer"
 
 # Azure 需要裸 token，无前缀
-llm_proxy.exe --backend-auth-header api-key --backend-auth-scheme ""
+.\llm_proxy.exe --backend-auth-header api-key --backend-auth-scheme ""
 ```
 
 **Linux（Shell）**：
@@ -553,7 +557,7 @@ llm_proxy.exe --backend-auth-header api-key --backend-auth-scheme ""
 
 ```powershell
 # OpenRouter 需要 HTTP-Referer 头
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-extra-headers '{\"HTTP-Referer\":\"https://example.com\",\"X-Title\":\"MyApp\"}'
 ```
 
@@ -575,7 +579,7 @@ llm_proxy.exe `
 
 ```powershell
 # 长推理场景，调大超时到 10 分钟
-llm_proxy.exe --backend-timeout 600
+.\llm_proxy.exe --backend-timeout 600
 ```
 
 **Linux（Shell）**：
@@ -585,7 +589,7 @@ llm_proxy.exe --backend-timeout 600
 ./llm_proxy --backend-timeout 600
 ```
 
-### 4.3 会话管理参数
+### 5.3 会话管理参数
 
 #### `--max-history N`
 
@@ -597,10 +601,10 @@ llm_proxy.exe --backend-timeout 600
 
 ```powershell
 # 长对话场景，调大历史
-llm_proxy.exe --max-history 1024
+.\llm_proxy.exe --max-history 1024
 
 # 节省内存
-llm_proxy.exe --max-history 128
+.\llm_proxy.exe --max-history 128
 ```
 
 **Linux（Shell）**：
@@ -623,7 +627,7 @@ llm_proxy.exe --max-history 128
 
 ```powershell
 # 单机限流
-llm_proxy.exe --max-sessions 64
+.\llm_proxy.exe --max-sessions 64
 ```
 
 **Linux（Shell）**：
@@ -643,10 +647,10 @@ llm_proxy.exe --max-sessions 64
 
 ```powershell
 # 快速回收
-llm_proxy.exe --session-timeout 300
+.\llm_proxy.exe --session-timeout 300
 
 # 长驻会话
-llm_proxy.exe --session-timeout 7200
+.\llm_proxy.exe --session-timeout 7200
 ```
 
 **Linux（Shell）**：
@@ -659,7 +663,7 @@ llm_proxy.exe --session-timeout 7200
 ./llm_proxy --session-timeout 7200
 ```
 
-### 4.4 日志参数
+### 5.4 日志参数
 
 #### `--log-level {DEBUG,INFO,WARNING,ERROR}`
 
@@ -671,10 +675,10 @@ llm_proxy.exe --session-timeout 7200
 
 ```powershell
 # 调试：打印每个后端请求、SSE 帧、被丢弃的 options key
-llm_proxy.exe --log-level DEBUG
+.\llm_proxy.exe --log-level DEBUG
 
 # 生产：只记录警告与错误
-llm_proxy.exe --log-level WARNING
+.\llm_proxy.exe --log-level WARNING
 ```
 
 **Linux（Shell）**：
@@ -689,7 +693,7 @@ llm_proxy.exe --log-level WARNING
 
 ---
 
-## 五、环境变量一览
+## 六、环境变量一览
 
 所有命令行参数均可用同名环境变量替代。适合在启动脚本或系统服务中统一配置。
 
@@ -711,13 +715,13 @@ llm_proxy.exe --log-level WARNING
 | `LLM_PROXY_SESSION_TIMEOUT` | `--session-timeout` | `1800` |
 | `LLM_PROXY_LOG_LEVEL` | `--log-level` | `INFO` |
 
-### 5.1 Windows（PowerShell）
+### 6.1 Windows（PowerShell）
 
 ```powershell
 $env:LLM_PROXY_BACKEND_URL   = "https://api.deepseek.com/v1"
 $env:LLM_PROXY_BACKEND_KEY   = "sk-xxxxxxxxxxxx"
 $env:LLM_PROXY_BACKEND_MODEL = "deepseek-chat"
-llm_proxy.exe
+.\llm_proxy.exe
 ```
 
 **永久生效**（写入用户环境变量）：
@@ -727,7 +731,7 @@ llm_proxy.exe
   "LLM_PROXY_BACKEND_URL", "https://api.deepseek.com/v1", "User")
 ```
 
-### 5.2 Linux（Shell）
+### 6.2 Linux（Shell）
 
 ```bash
 export LLM_PROXY_BACKEND_URL="https://api.deepseek.com/v1"
@@ -748,14 +752,14 @@ source ~/.bashrc
 
 ---
 
-## 六、完整使用场景
+## 七、完整使用场景
 
 ### 场景 1：连接 LM Studio
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url http://127.0.0.1:12345/v1 `
   --backend-model "nvidia-nemotron-3.5-lightning-30b-a3b@q4_k_m" `
   --backend-key lm-studio `
@@ -787,7 +791,7 @@ llm_proxy.exe `
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url http://127.0.0.1:11434/v1 `
   --backend-model qwen2.5:7b `
   --backend-key ollama
@@ -812,7 +816,7 @@ llm_proxy.exe `
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://api.deepseek.com/v1 `
   --backend-key sk-xxxxxxxxxxxxxxxx `
   --backend-model deepseek-chat `
@@ -839,7 +843,7 @@ llm_proxy.exe `
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://openrouter.ai/api/v1 `
   --backend-key sk-or-xxxxxxxxxxxx `
   --backend-model "anthropic/claude-3.5-sonnet" `
@@ -867,7 +871,7 @@ llm_proxy.exe `
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url "https://my-resource.openai.azure.com/openai/deployments/gpt-4?api-version=2024-08-01-preview" `
   --backend-key xxxxxxxxxxxxxxxx `
   --backend-auth-header api-key `
@@ -898,7 +902,7 @@ llm_proxy.exe `
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url http://127.0.0.1:4000/v1 `
   --backend-key any-value `
   --backend-model gpt-4o
@@ -920,36 +924,20 @@ llm_proxy.exe `
 
 ### 场景 7：跨机部署（GPU 主机 + 弱机客户端）
 
-**GPU 主机（服务端）—— Windows（PowerShell）**：
+**GPU 主机（服务端）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --endpoint 0.0.0.0:9898 `
   --app-name LLM_Service `
   --backend-url http://127.0.0.1:12345/v1 `
   --backend-model "nvidia-nemotron-3.5-lightning-30b-a3b@q4_k_m"
 ```
 
-**GPU 主机（服务端）—— Linux（Shell）**：
-
-```bash
-./llm_proxy \
-  --endpoint 0.0.0.0:9898 \
-  --app-name LLM_Service \
-  --backend-url http://127.0.0.1:12345/v1 \
-  --backend-model "nvidia-nemotron-3.5-lightning-30b-a3b@q4_k_m"
-```
-
-**弱机（客户端）—— Windows（PowerShell）**：
+**弱机（客户端）**：
 
 ```powershell
-llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
-```
-
-**弱机（客户端）—— Linux（Shell）**：
-
-```bash
-./llm_test --endpoint 192.168.1.100:9898 --server-app LLM_Service
+.\llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
 ```
 
 **要点**：
@@ -958,16 +946,16 @@ llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
 - 客户端通过 `--endpoint` 指定远程 IP。
 - 防火墙需放行 `9898` 端口。
 
-### 场景 8：与 `llm_service` 同机共存
+### 场景 8：与 llm_service 同机共存
 
 **Windows（PowerShell）**：
 
 ```powershell
 # 终端 1：llm_service 用默认端点
-llm_service_cpu.exe
+.\llm_service.exe
 
 # 终端 2：llm_proxy 换用其他端点
-llm_proxy.exe `
+.\llm_proxy.exe `
   --endpoint ipc:llm_proxy `
   --app-name LLM_Proxy `
   --backend-url http://127.0.0.1:1234/v1
@@ -977,7 +965,7 @@ llm_proxy.exe `
 
 ```bash
 # 终端 1：llm_service 用默认端点
-./llm_service_cpu
+./llm_service
 
 # 终端 2：llm_proxy 换用其他端点
 ./llm_proxy \
@@ -991,12 +979,25 @@ llm_proxy.exe `
 - 两者**必须**使用不同的 `--endpoint` 和 `--app-name`。
 - 客户端连接时相应调整 `--endpoint` 与 `--server-app`。
 
+### 图 5：同机共存的两个服务端
+
+```mermaid
+flowchart LR
+    A["🧠 llm_service.exe<br/>ipc:llm_service / LLM_Service"] --> C["🤖 客户端 A"]
+    B["🌉 llm_proxy.exe<br/>ipc:llm_proxy / LLM_Proxy"] --> D["🤖 客户端 B"]
+
+    style A fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style C fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style D fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+```
+
 ### 场景 9：调试模式
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url http://127.0.0.1:1234/v1 `
   --log-level DEBUG
 ```
@@ -1012,7 +1013,7 @@ llm_proxy.exe `
 **要点**：
 
 - `DEBUG` 会打印每个后端请求、SSE 帧、被丢弃的 options key。
-- 用于排查"客户端收不到流"、"返回为空"等问题。
+- 用于排查“客户端收不到流”、“返回为空”等问题。
 
 ### 场景 10：使用密钥文件
 
@@ -1024,7 +1025,7 @@ New-Item -ItemType Directory -Force -Path ./secrets | Out-Null
 "sk-xxxxxxxxxxxxxxxx" | Out-File -Encoding utf8 ./secrets/deepseek.key
 
 # 启动
-llm_proxy.exe `
+.\llm_proxy.exe `
   --backend-url https://api.deepseek.com/v1 `
   --backend-key-file ./secrets/deepseek.key `
   --backend-model deepseek-chat
@@ -1052,7 +1053,7 @@ chmod 600 ./secrets/deepseek.key
 
 ---
 
-## 七、故障排查
+## 八、故障排查
 
 ### Q1：启动时报 `--backend-extra-headers is not valid JSON`
 
@@ -1062,7 +1063,7 @@ chmod 600 ./secrets/deepseek.key
 
 ```powershell
 # 用单引号包裹，内部双引号用反斜杠转义
-llm_proxy.exe --backend-extra-headers '{\"X-Title\":\"App\"}'
+.\llm_proxy.exe --backend-extra-headers '{\"X-Title\":\"App\"}'
 ```
 
 **Linux（Shell）**：
@@ -1078,7 +1079,7 @@ llm_proxy.exe --backend-extra-headers '{\"X-Title\":\"App\"}'
 
 ```powershell
 $env:LLM_PROXY_BACKEND_EXTRA_HEADERS = '{"X-Title":"App"}'
-llm_proxy.exe
+.\llm_proxy.exe
 ```
 
 **Linux（Shell）**：
@@ -1094,24 +1095,12 @@ export LLM_PROXY_BACKEND_EXTRA_HEADERS='{"X-Title":"App"}'
 
 **排查**：
 
-**Windows（PowerShell）**：
-
 ```powershell
 # 明确指定模型
-llm_proxy.exe --backend-model "your-model-id"
+.\llm_proxy.exe --backend-model "your-model-id"
 
 # 验证 /v1/models 可用
 curl.exe http://127.0.0.1:1234/v1/models
-```
-
-**Linux（Shell）**：
-
-```bash
-# 明确指定模型
-./llm_proxy --backend-model "your-model-id"
-
-# 验证 /v1/models 可用
-curl http://127.0.0.1:1234/v1/models
 ```
 
 ### Q3：客户端收到流但一个字都没有
@@ -1120,20 +1109,10 @@ curl http://127.0.0.1:1234/v1/models
 
 **排查**：
 
-**Windows（PowerShell）**：
-
 ```powershell
 curl.exe -N -X POST http://127.0.0.1:1234/v1/chat/completions `
   -H "Content-Type: application/json" `
   -d '{\"model\":\"<id>\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":true}'
-```
-
-**Linux（Shell）**：
-
-```bash
-curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"<id>","messages":[{"role":"user","content":"hi"}],"stream":true}'
 ```
 
 **判据**：输出应逐行实时，且每行以 `data: `（带空格）开头。
@@ -1142,7 +1121,7 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 
 **原因**：`llm_proxy` 不支持 `set_system_message`。
 
-**解决**：使用"新建会话"路径，把 system message 通过 `create_session` 的 `system_message` 字段传入。
+**解决**：使用“新建会话”路径，把 system message 通过 `create_session` 的 `system_message` 字段传入。详见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P6-3。
 
 ### Q5：启动时提示 `Queue "llm_service0" is already occupied`
 
@@ -1153,7 +1132,7 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 **Windows（PowerShell）**：
 
 ```powershell
-llm_proxy.exe --endpoint ipc:llm_proxy --app-name LLM_Proxy
+.\llm_proxy.exe --endpoint ipc:llm_proxy --app-name LLM_Proxy
 ```
 
 **Linux（Shell）**：
@@ -1168,22 +1147,11 @@ llm_proxy.exe --endpoint ipc:llm_proxy --app-name LLM_Proxy
 
 **排查**：
 
-**Windows（PowerShell）**：
-
 ```powershell
 curl.exe -X POST https://api.deepseek.com/v1/chat/completions `
   -H "Authorization: Bearer sk-xxx" `
   -H "Content-Type: application/json" `
   -d '{\"model\":\"deepseek-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}'
-```
-
-**Linux（Shell）**：
-
-```bash
-curl -X POST https://api.deepseek.com/v1/chat/completions \
-  -H "Authorization: Bearer sk-xxx" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"deepseek-chat","messages":[{"role":"user","content":"hi"}]}'
 ```
 
 **对应参数**：
@@ -1197,25 +1165,27 @@ curl -X POST https://api.deepseek.com/v1/chat/completions \
 
 **解决**：
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_proxy.exe --backend-key "your-key"
+.\llm_proxy.exe --backend-key "your-key"
 ```
 
-**Linux（Shell）**：
+### Q8：流式输出延迟数秒才收到第一批 token
 
-```bash
-./llm_proxy --backend-key "your-key"
-```
+**原因**：这是 `requests` 的 SSE 缓冲问题，`llm_proxy` 已改用 `http.client` 规避。若仍出现：
+
+1. 检查后端是否强制 gzip 压缩（代理已设置 `Accept-Encoding: identity`）。
+2. 检查是否经过 nginx 反代，某些反代会缓冲 SSE。
+3. 用 `--log-level DEBUG` 观察 SSE 帧到达时间。
+
+详见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P0-4。
 
 ---
 
-## 八、启动参数速查
+## 九、启动参数速查
 
 ```
-llm_proxy [OPTIONS]              # Linux
 llm_proxy.exe [OPTIONS]          # Windows
+./llm_proxy [OPTIONS]            # Linux
 
 LingoFuse 服务
   --endpoint ADDRESS      服务端点 (默认: ipc:llm_service)
@@ -1245,14 +1215,19 @@ LingoFuse 服务
 
 ---
 
-## 九、相关文档
+## 十、相关文档（同目录）
 
-- **兼容性指南**：`LingoFuse_LLM_Proxy_Compatibility_Guide.md` —— 支持的全部 129+ OpenAI 兼容后端、平台、工具清单
-- **服务端命令行手册**：`LingoFuse_LLM_Service_guide.md` —— `llm_service` 的对应使用手册
-- **流式开发要点**：`LingoFuse_Python_Streaming_LLM_Guide.md` —— 客户端侧流式接入要点
+| 文档 | 说明 |
+|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | LLM 工具链版本演进与架构决策（历史参考） |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
 ---
 
-**文档版本**：V2.0  
+**文档版本**：V3.0（仅保留同目录链接，高对比配色）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）
