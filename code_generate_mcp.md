@@ -951,7 +951,7 @@ flowchart TB
 | `Build_Guide.md` | 编译指南（Pascal 和 Python 组件） |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
 | `readme.md` | 项目总览与闭环架构 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 
 ### 子目录文档（`src/`）
 
