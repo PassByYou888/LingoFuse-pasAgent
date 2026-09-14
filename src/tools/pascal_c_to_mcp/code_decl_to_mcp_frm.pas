@@ -1,7 +1,7 @@
 unit code_decl_to_mcp_frm;
 
 {$DEFINE FPC_DELPHI_MODE}
-{$I ..\..\..\Z.Define.inc}
+{$I ..\..\..\zNetV2\source\Z.Define.inc}
 
 interface
 
