@@ -1,48 +1,41 @@
 # LingoFuse LLM Service 命令行使用手册
 
-> **适用程序**：`llm_service`（Linux）/ `llm_service_*.exe`（Windows）  
-> **文档版本**：V1.0  
-> **最后更新**：2026-09-13
+> **适用程序**：`llm_service.exe`（Windows）/ `llm_service`（Linux）  
+> **文档版本**：V2.1  
+> **最后更新**：2026-09-14  
+> **相关文档**（同目录）：
+> - LLM 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
+> - LLM 代理命令行手册：`LingoFuse_LLM_Proxy_CLI_Guide.md`
+> - 代理兼容性指南：`LingoFuse_LLM_Proxy_Compatibility_Guide.md`
+> - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
+> - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
+> - llama-cpp-python 安装：`llama_cpp_python_guide.md`
 
 ---
 
-## 一、程序启动名
+## 一、程序定位
 
-`llm_service` 支持两种部署形态，对应两种启动名：
+`llm_service.exe` 是一个 **基于 LingoFuse 服务网格的多会话流式 LLM 服务端**。它加载本地 GGUF 模型，暴露标准 LingoFuse API，供 AI 客户端或 MCP 网关调用。
 
-| 平台 | 启动名 | 说明 |
-|------|--------|------|
-| **Windows** | `llm_service_cpu.exe` / `llm_service_cu124.exe` / `llm_service_vulkan.exe` / `llm_service_metal.exe` / `llm_service_openblas.exe` | 不同后缀对应不同推理后端 |
-| **Linux** | `llm_service`（打包后无扩展名）；源码运行为 `python llm_service.py` | 同上，通常按后端区分为不同文件名 |
+它是 pasAgent 闭环中**“AI 的大脑”**这一环节，负责让 AI 理解用户意图、决定调用哪个工具、接收工具执行结果并生成最终回复。
 
-**后端区别**：
+### 图 1：llm_service 在闭环中的位置
 
-| 文件名 | 后端 | 适用场景 | 显存要求 |
-|--------|------|----------|----------|
-| `llm_service_cpu` | CPU（llama.cpp） | 无独显、笔记本、云主机 | 仅需内存 |
-| `llm_service_cu124` | CUDA 12.4 | NVIDIA 显卡 | ≥ 8GB 显存跑 7B Q4_K_M |
-| `llm_service_vulkan` | Vulkan | AMD/Intel/NVIDIA 跨平台 GPU | ≥ 8GB 显存 |
-| `llm_service_metal` | Metal | Apple Silicon | 统一内存 |
-| `llm_service_openblas` | OpenBLAS | CPU BLAS 加速 | 仅需内存 |
+```mermaid
+flowchart LR
+    A["📡 信标"] --> B["🌉 MCP 网关"]
+    B --> C["🤖 AI 客户端"]
+    C --> D["🧠 LLM 服务<br/>llm_service.exe"]
+    D -->|"决策：调用工具"| B
 
-**判定规则**：程序启动时自动检测是否被 PyInstaller / Nuitka 打包。若已打包，`--help` 顶部用法行与示例显示当前可执行文件名；若源码运行，则显示 `llm_service.py`。
-
-**本文档约定**：
-
-- 所有命令示例分 **PowerShell（Windows）** 与 **Shell（Linux）** 两个版本
-- Windows 多行续行使用**反引号** `` ` ``
-- Linux 多行续行使用**反斜杠** `\`
-- 示例中统一用 `llm_service_cpu` 作为程序名代表，实际替换为你所用后端版本即可
-
-```powershell
-# Windows PowerShell：查看帮助
-llm_service_cpu.exe --help
+    style A fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style D fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
 ```
 
-```bash
-# Linux Shell：查看帮助
-./llm_service --help
-```
+**运行环境**：Windows / Linux。  
+**依赖**：`LingoFuse64.dll` / `liblingofuse.so`（位于系统 PATH 或 exe 同目录）。
 
 ---
 
@@ -56,45 +49,125 @@ llm_service_cpu.exe --help
 
 ```powershell
 cd C:\Temp\temp2
-.\llm_service_cpu.exe
+.\llm_service.exe
 ```
 
 **Linux（Shell）**：
 
 ```bash
 cd /opt/llm
-./llm_service_cpu
+./llm_service
 ```
 
-### 2.2 指定模型
+### 2.2 显存/内存不足时的替代方案
+
+若本地加载 20 GB 模型资源不足，可改用 `llm_proxy.exe` 转发到 LM Studio：
+
+```powershell
+.\llm_proxy.exe --backend-url http://127.0.0.1:1234/v1
+```
+
+此时无需 `llm_service.exe` 和模型文件。详见同目录 `LingoFuse_LLM_Proxy_CLI_Guide.md`。
+
+---
+
+## 三、运行前提
+
+### 3.1 模型文件必须就位
+
+服务默认从**当前工作目录**扫描：
+
+```
+NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
+```
+
+**要求**：
+
+- 文件名大小写严格匹配，不要重命名。
+- 文件必须与 `llm_service.exe` 位于同一目录（或通过 `--model-path` 指定路径）。
+- 文件完整，约 **20 GB**。
+
+未找到时服务将报错退出：
+
+```
+[ERROR] Model file not found: ./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
+```
+
+> **模型下载**：请参考预编译包同目录下的模型文档，或从 Hugging Face 搜索 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF`。
+
+### 3.2 动态库必须可加载
+
+启动时首先加载 LingoFuse 动态库。成功时打印：
+
+```
+[INFO] Successfully loaded from system PATH: LingoFuse64.dll
+```
+
+失败时请检查：
+
+- `LingoFuse64.dll` / `liblingofuse.so` 是否在系统 `PATH`，或在 exe 同目录。
+- 动态库位数与 exe 一致（64 位 vs 32 位）。
+- 依赖的 `z_ipc_64.dll` 是否可被找到。
+
+### 3.3 工作目录建议
+
+建议在**放模型和 exe 的目录**里打开命令行，这样默认路径就能生效。
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --model-path D:\models\qwen2.5-7b.gguf
+cd C:\Temp\temp2
+.\llm_service.exe
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --model-path /data/models/qwen2.5-7b.gguf
+cd /opt/llm
+./llm_service
 ```
 
-### 2.3 GPU 加速（NVIDIA）
+---
 
-**Windows（PowerShell）**：
+## 四、启动流程一览
 
-```powershell
-llm_service_cu124.exe --gpu-layers -1 --threads 4
+为避免一张图信息过载，按**启动阶段**拆分为两张小图。
+
+### 图 2：启动阶段
+
+```mermaid
+flowchart LR
+    A["1️⃣ 加载动态库"] --> B["2️⃣ 检测 LLM 后端"]
+    B --> C["3️⃣ 加载 GGUF 模型"]
+    C --> D["4️⃣ 注册 Call API"]
+    D --> E["5️⃣ 启动服务网格"]
+    E --> F["6️⃣ 进入监听状态"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style E fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style F fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-**Linux（Shell）**：
+### 图 3：请求处理流程
 
-```bash
-./llm_service_cu124 --gpu-layers -1 --threads 4
+```mermaid
+flowchart LR
+    A["客户端调用 generate"] --> B["立即返回 session_id"]
+    B --> C["后台线程流式生成"]
+    C --> D["逐 token 推送<br/>Sequenced Notify"]
+    D --> E["发送 finish 事件"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-启动成功后，会打印一段状态横幅，然后进入监听状态：
+启动成功后打印状态横幅：
 
 ```
 ======================================================================
@@ -129,82 +202,26 @@ llm_service_cu124.exe --gpu-layers -1 --threads 4
 
 ---
 
-## 三、运行前提
+## 五、参数详解
 
-### 3.1 模型文件必须就位
-
-服务默认从**当前工作目录**扫描：
-
-```
-NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
-```
-
-**要求**：
-
-- 文件名大小写严格匹配，不要重命名。
-- 文件必须与 `exe` 位于同一目录（或通过 `--model-path` 指定路径）。
-- 文件完整，约 **4.7 GB**。
-
-未找到时服务将报错退出：
-
-```
-[ERROR] Model file not found: ./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
-```
-
-### 3.2 动态库必须可加载
-
-`exe` 启动时首先加载 LingoFuse 动态库。成功时打印：
-
-```
-[INFO] Successfully loaded from system PATH: LingoFuse64.dll
-```
-
-失败时请检查：
-
-- `LingoFuse64.dll` / `liblingofuse.so` 是否在系统 `PATH`，或在 `exe` 同目录。
-- 动态库位数与 `exe` 一致（64 位 vs 32 位）。
-- 依赖的 `z_ipc_64.dll` 是否可被找到。
-
-### 3.3 工作目录建议
-
-建议在**放模型和 exe 的目录**里打开命令行，这样默认路径就能生效。
-
-**Windows（PowerShell）**：
-
-```powershell
-cd C:\Temp\temp2
-.\llm_service_cpu.exe
-```
-
-**Linux（Shell）**：
-
-```bash
-cd /opt/llm
-./llm_service_cpu
-```
-
----
-
-## 四、参数详解
-
-### 4.1 模型与推理参数
+### 5.1 模型与推理参数
 
 #### `--model-path PATH`
 
-- **作用**：指定 GGUF 模型文件路径（或 HuggingFace 模型目录）。
+- **作用**：指定 GGUF 模型文件路径。
 - **默认**：`./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf`
 - **环境变量**：`LLM_MODEL_PATH`
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --model-path D:\models\qwen2.5-7b.gguf
+.\llm_service.exe --model-path D:\models\qwen2.5-7b.gguf
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --model-path /data/models/qwen2.5-7b.gguf
+./llm_service --model-path /data/models/qwen2.5-7b.gguf
 ```
 
 #### `--context-size N`
@@ -217,20 +234,20 @@ llm_service_cpu.exe --model-path D:\models\qwen2.5-7b.gguf
 
 ```powershell
 # 使用模型最大上下文（默认）
-llm_service_cpu.exe --context-size 0
+.\llm_service.exe --context-size 0
 
 # 显式指定 8192
-llm_service_cpu.exe --context-size 8192
+.\llm_service.exe --context-size 8192
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 使用模型最大上下文（默认）
-./llm_service_cpu --context-size 0
+./llm_service --context-size 0
 
 # 显式指定 8192
-./llm_service_cpu --context-size 8192
+./llm_service --context-size 8192
 ```
 
 #### `--max-tokens N`
@@ -242,13 +259,13 @@ llm_service_cpu.exe --context-size 8192
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --max-tokens 2048
+.\llm_service.exe --max-tokens 2048
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --max-tokens 2048
+./llm_service --max-tokens 2048
 ```
 
 #### `--threads N`
@@ -261,13 +278,13 @@ llm_service_cpu.exe --max-tokens 2048
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --threads 8
+.\llm_service.exe --threads 8
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --threads 8
+./llm_service --threads 8
 ```
 
 #### `--gpu-layers N`
@@ -284,26 +301,26 @@ llm_service_cpu.exe --threads 8
 
 ```powershell
 # 纯 CPU
-llm_service_cpu.exe --gpu-layers 0
+.\llm_service.exe --gpu-layers 0
 
 # 全部卸载到 GPU
-llm_service_cu124.exe --gpu-layers -1
+.\llm_service.exe --gpu-layers -1
 
 # 显存不足时逐步下调
-llm_service_cu124.exe --gpu-layers 20
+.\llm_service.exe --gpu-layers 20
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 纯 CPU
-./llm_service_cpu --gpu-layers 0
+./llm_service --gpu-layers 0
 
 # 全部卸载到 GPU
-./llm_service_cu124 --gpu-layers -1
+./llm_service --gpu-layers -1
 
 # 显存不足时逐步下调
-./llm_service_cu124 --gpu-layers 20
+./llm_service --gpu-layers 20
 ```
 
 #### `--system-message "MESSAGE"`
@@ -315,16 +332,16 @@ llm_service_cu124.exe --gpu-layers 20
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --system-message "You are a helpful assistant."
+.\llm_service.exe --system-message "You are a helpful assistant."
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --system-message "You are a helpful assistant."
+./llm_service --system-message "You are a helpful assistant."
 ```
 
-### 4.2 LingoFuse 服务参数
+### 5.2 LingoFuse 服务参数
 
 #### `--endpoint ADDRESS`
 
@@ -336,20 +353,20 @@ llm_service_cpu.exe --system-message "You are a helpful assistant."
 
 ```powershell
 # 同机 IPC（默认）
-llm_service_cpu.exe --endpoint ipc:llm_service
+.\llm_service.exe --endpoint ipc:llm_service
 
 # 跨机 TCP（监听所有网卡）
-llm_service_cpu.exe --endpoint 0.0.0.0:9898
+.\llm_service.exe --endpoint 0.0.0.0:9898
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 同机 IPC（默认）
-./llm_service_cpu --endpoint ipc:llm_service
+./llm_service --endpoint ipc:llm_service
 
 # 跨机 TCP（监听所有网卡）
-./llm_service_cpu --endpoint 0.0.0.0:9898
+./llm_service --endpoint 0.0.0.0:9898
 ```
 
 #### `--app-name NAME`
@@ -362,13 +379,13 @@ llm_service_cpu.exe --endpoint 0.0.0.0:9898
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --app-name LLM_Service --endpoint ipc:llm_service
+.\llm_service.exe --app-name LLM_Service --endpoint ipc:llm_service
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --app-name LLM_Service --endpoint ipc:llm_service
+./llm_service --app-name LLM_Service --endpoint ipc:llm_service
 ```
 
 #### `--notify-api NAME`
@@ -387,16 +404,16 @@ llm_service_cpu.exe --app-name LLM_Service --endpoint ipc:llm_service
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --timeout 10000
+.\llm_service.exe --timeout 10000
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --timeout 10000
+./llm_service --timeout 10000
 ```
 
-### 4.3 服务行为参数
+### 5.3 服务行为参数
 
 #### `--session-timeout SECONDS`
 
@@ -410,23 +427,45 @@ llm_service_cpu.exe --timeout 10000
 
 ```powershell
 # 快速回收
-llm_service_cpu.exe --session-timeout 300
+.\llm_service.exe --session-timeout 300
 
 # 长驻会话
-llm_service_cpu.exe --session-timeout 3600
+.\llm_service.exe --session-timeout 3600
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 快速回收
-./llm_service_cpu --session-timeout 300
+./llm_service --session-timeout 300
 
 # 长驻会话
-./llm_service_cpu --session-timeout 3600
+./llm_service --session-timeout 3600
 ```
 
-> **双条件回收策略说明**：客户端偶尔会断开重连（笔记本休眠、网络抖动、客户端重启）。如果仅按空闲时长回收，客户端只要暂停超过阈值就会丢失整个对话历史。加上"客户端离线"这一条件后，只要客户端还在线，会话就一直保留；只有当客户端真正离线（进程被杀、机器关机）且空闲超时，会话才被回收。
+> **双条件回收策略说明**：客户端偶尔会断开重连（笔记本休眠、网络抖动、客户端重启）。如果仅按空闲时长回收，客户端只要暂停超过阈值就会丢失整个对话历史。加上“客户端离线”这一条件后，只要客户端还在线，会话就一直保留；只有当客户端真正离线（进程被杀、机器关机）且空闲超时，会话才被回收。
+
+### 图 4：会话回收双条件判断
+
+```mermaid
+flowchart TB
+    A["Watchdog 每 5 秒扫描"] --> B{"会话状态 = idle?"}
+    B -->|否| C["跳过（正在生成）"]
+    B -->|是| D{"空闲 > session_timeout?"}
+    D -->|否| E["保留（未超时）"]
+    D -->|是| F{"客户端 app 在线?"}
+    F -->|是| G["保留（客户端可能回来）"]
+    F -->|否| H["回收会话<br/>reason=timeout+offline"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#5D6D7E,stroke:#2C3E50,stroke-width:3px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style E fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style G fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style H fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+```
 
 #### `--queue-max-size N`
 
@@ -437,13 +476,13 @@ llm_service_cpu.exe --session-timeout 3600
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --queue-max-size 512
+.\llm_service.exe --queue-max-size 512
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --queue-max-size 512
+./llm_service --queue-max-size 512
 ```
 
 #### `--max-sessions N`
@@ -456,17 +495,17 @@ llm_service_cpu.exe --queue-max-size 512
 
 ```powershell
 # 单机限流
-llm_service_cpu.exe --max-sessions 64
+.\llm_service.exe --max-sessions 64
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 单机限流
-./llm_service_cpu --max-sessions 64
+./llm_service --max-sessions 64
 ```
 
-### 4.4 聊天模板与推理参数
+### 5.4 聊天模板与推理参数
 
 #### `--chat-template PATH`
 
@@ -481,13 +520,13 @@ llm_service_cpu.exe --max-sessions 64
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --chat-template .\chat_template.jinja
+.\llm_service.exe --chat-template .\chat_template.jinja
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --chat-template ./chat_template.jinja
+./llm_service --chat-template ./chat_template.jinja
 ```
 
 #### `--reasoning-budget-message "TEXT"`
@@ -500,36 +539,36 @@ llm_service_cpu.exe --chat-template .\chat_template.jinja
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --reasoning-budget-message "Think in English first."
+.\llm_service.exe --reasoning-budget-message "Think in English first."
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --reasoning-budget-message "Think in English first."
+./llm_service --reasoning-budget-message "Think in English first."
 ```
 
-### 4.5 日志参数
+### 5.5 日志参数
 
 #### `--log-level {0,1,2}`
 
 - **作用**：日志详细程度。
   - `0` = quiet：抑制 chunk 日志和警告
   - `1` = normal：显示每个 chunk 的推送日志，抑制警告（默认）
-  - `2` = debug：显示所有日志，包括"目标客户端不可达"等警告
+  - `2` = debug：显示所有日志，包括“目标客户端不可达”等警告
 - **默认**：`1`
 - **环境变量**：`LLM_LOG_LEVEL`
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --log-level 1
+.\llm_service.exe --log-level 1
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --log-level 1
+./llm_service --log-level 1
 ```
 
 #### `--debug`
@@ -540,13 +579,13 @@ llm_service_cpu.exe --log-level 1
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --debug
+.\llm_service.exe --debug
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --debug
+./llm_service --debug
 ```
 
 #### `--quiet`
@@ -557,20 +596,20 @@ llm_service_cpu.exe --debug
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --quiet
+.\llm_service.exe --quiet
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu --quiet
+./llm_service --quiet
 ```
 
 **优先级**：`--debug` > `--quiet` > `--log-level`。
 
 ---
 
-## 五、环境变量一览
+## 六、环境变量一览
 
 所有命令行参数均可用同名环境变量替代。适合在启动脚本或系统服务中统一配置。
 
@@ -595,12 +634,12 @@ llm_service_cpu.exe --quiet
 | `LLM_DEBUG` | `--debug` | `1` / `true` / `yes` |
 | `LLM_QUIET` | `--quiet` | `1` / `true` / `yes` |
 
-### 5.1 Windows（PowerShell）
+### 6.1 Windows（PowerShell）
 
 ```powershell
 $env:LLM_GPU_LAYERS = "0"
 $env:LLM_THREADS = "8"
-llm_service_cpu.exe
+.\llm_service.exe
 ```
 
 **永久生效**（写入用户环境变量）：
@@ -609,12 +648,12 @@ llm_service_cpu.exe
 [System.Environment]::SetEnvironmentVariable("LLM_GPU_LAYERS", "0", "User")
 ```
 
-### 5.2 Linux（Shell）
+### 6.2 Linux（Shell）
 
 ```bash
 export LLM_GPU_LAYERS=0
 export LLM_THREADS=8
-./llm_service_cpu
+./llm_service
 ```
 
 **永久生效**（写入 `~/.bashrc`）：
@@ -629,39 +668,41 @@ source ~/.bashrc
 
 ---
 
-## 六、完整使用场景
+## 七、完整使用场景
 
 ### 场景 1：CPU 纯离线启动（无独显）
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe `
+.\llm_service.exe `
   --gpu-layers 0 `
   --threads 8 `
+  --context-size 8192 `
   --quiet
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu \
+./llm_service \
   --gpu-layers 0 \
   --threads 8 \
+  --context-size 8192 \
   --quiet
 ```
 
 **要点**：
 
 - 6~14 tokens/s（取决于 CPU）。
-- 适合 7×24 小时运行，风扇噪声可控。
+- 20 GB 模型需 32 GB 以上内存，可适当降低上下文。
 
-### 场景 2：NVIDIA 显卡加速（默认全卸载）
+### 场景 2：GPU 加速（默认全卸载）
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cu124.exe `
+.\llm_service.exe `
   --gpu-layers -1 `
   --threads 4
 ```
@@ -669,7 +710,7 @@ llm_service_cu124.exe `
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cu124 \
+./llm_service \
   --gpu-layers -1 \
   --threads 4
 ```
@@ -685,79 +726,65 @@ llm_service_cu124.exe `
 
 ```powershell
 # 先试 20 层
-llm_service_cu124.exe --gpu-layers 20
+.\llm_service.exe --gpu-layers 20
 
 # 若仍 OOM，降到 10 层
-llm_service_cu124.exe --gpu-layers 10
+.\llm_service.exe --gpu-layers 10
 
 # 最后回退纯 CPU
-llm_service_cu124.exe --gpu-layers 0
+.\llm_service.exe --gpu-layers 0
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 先试 20 层
-./llm_service_cu124 --gpu-layers 20
+./llm_service --gpu-layers 20
 
 # 若仍 OOM，降到 10 层
-./llm_service_cu124 --gpu-layers 10
+./llm_service --gpu-layers 10
 
 # 最后回退纯 CPU
-./llm_service_cu124 --gpu-layers 0
+./llm_service --gpu-layers 0
 ```
 
-### 场景 4：自定义端点和应用名（多服务共存）
+### 场景 4：自定义端点和应用名（与 llm_proxy 共存）
 
 **Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe `
-  --endpoint ipc:llm_service_A `
-  --app-name LLM_Service_A
+.\llm_service.exe `
+  --endpoint ipc:llm_service `
+  --app-name LLM_Service
 ```
 
 **Linux（Shell）**：
 
 ```bash
-./llm_service_cpu \
-  --endpoint ipc:llm_service_A \
-  --app-name LLM_Service_A
+./llm_service \
+  --endpoint ipc:llm_service \
+  --app-name LLM_Service
 ```
 
 **要点**：
 
-- 便于同机跑多个 LLM 服务实例（加载不同模型）。
-- 客户端需要对应调整 `--endpoint` 和 `--server-app`。
+- `llm_proxy` 需要改用 `--endpoint ipc:llm_proxy --app-name LLM_Proxy`。
+- 两者**不能**共享同一个 endpoint。
 
 ### 场景 5：跨机部署（TCP 模式）
 
-**GPU 工作站（服务端）—— Windows（PowerShell）**：
+**GPU 工作站（服务端）**：
 
 ```powershell
-llm_service_cu124.exe `
+.\llm_service.exe `
   --endpoint 0.0.0.0:9898 `
   --app-name LLM_Service
 ```
 
-**GPU 工作站（服务端）—— Linux（Shell）**：
-
-```bash
-./llm_service_cu124 \
-  --endpoint 0.0.0.0:9898 \
-  --app-name LLM_Service
-```
-
-**弱机笔记本（客户端）—— Windows（PowerShell）**：
+**弱机笔记本（客户端）**：
 
 ```powershell
-llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
-```
-
-**弱机笔记本（客户端）—— Linux（Shell）**：
-
-```bash
-./llm_test --endpoint 192.168.1.100:9898 --server-app LLM_Service
+.\llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
 ```
 
 **要点**：
@@ -767,127 +794,77 @@ llm_test.exe --endpoint 192.168.1.100:9898 --server-app LLM_Service
 
 ### 场景 6：日志调试（开发排查）
 
-**Windows（PowerShell）**：
-
 ```powershell
-llm_service_cpu.exe --debug
+.\llm_service.exe --debug
 ```
-
-**Linux（Shell）**：
-
-```bash
-./llm_service_cpu --debug
-```
-
-**要点**：
 
 - 打印每个 chunk 的 JSON、客户端可达性警告、watchdog 决策日志。
 - 仅用于排查，生产环境请用 `--quiet`。
 
 ### 场景 7：自定义系统提示词
 
-**Windows（PowerShell）**：
+```powershell
+.\llm_service.exe --system-message "你是一个代码声明转换助手，只转换声明部分，禁止 markdown 输出。"
+```
+
+### 场景 8：验证 LLM 服务是否正常
+
+启动 `llm_service.exe` 后，在另一个窗口执行：
 
 ```powershell
-llm_service_cpu.exe `
-  --system-message "你是一个代码声明转换助手，只转换声明部分，禁止 markdown 输出。"
+.\llm_test.exe
 ```
 
-**Linux（Shell）**：
-
-```bash
-./llm_service_cpu \
-  --system-message "你是一个代码声明转换助手，只转换声明部分，禁止 markdown 输出。"
-```
-
-### 场景 8：自定义聊天模板
-
-**Windows（PowerShell）**：
-
-```powershell
-llm_service_cpu.exe `
-  --chat-template .\chat_template.jinja `
-  --reasoning-budget-message "Think in Chinese first."
-```
-
-**Linux（Shell）**：
-
-```bash
-./llm_service_cpu \
-  --chat-template ./chat_template.jinja \
-  --reasoning-budget-message "Think in Chinese first."
-```
-
-**要点**：
-
-- 模板中可访问 `messages`、`enable_thinking`、`reasoning_budget_message` 等变量。
-- 若使用自定义模板，需安装 `jinja2`。
-
-### 场景 9：与 `llm_proxy` 同机共存
-
-**Windows（PowerShell）**：
-
-```powershell
-# 终端 1：llm_service 用默认端点
-llm_service_cpu.exe
-
-# 终端 2：llm_proxy 换用其他端点
-llm_proxy.exe `
-  --endpoint ipc:llm_proxy `
-  --app-name LLM_Proxy `
-  --backend-url http://127.0.0.1:1234/v1
-```
-
-**Linux（Shell）**：
-
-```bash
-# 终端 1：llm_service 用默认端点
-./llm_service_cpu
-
-# 终端 2：llm_proxy 换用其他端点
-./llm_proxy \
-  --endpoint ipc:llm_proxy \
-  --app-name LLM_Proxy \
-  --backend-url http://127.0.0.1:1234/v1
-```
-
-**要点**：
-
-- 两者**必须**使用不同的 `--endpoint` 和 `--app-name`。
-- 客户端连接时相应调整 `--endpoint` 与 `--server-app`。
-
-### 场景 10：会话双条件回收调优
-
-**Windows（PowerShell）**：
-
-```powershell
-# 桌面场景：会话保留 1 小时，客户端在线期间即使闲置也保留
-llm_service_cpu.exe `
-  --session-timeout 3600 `
-  --max-sessions 64
-```
-
-**Linux（Shell）**：
-
-```bash
-# 服务器场景：会话保留 10 分钟，客户端离线且超时后回收
-./llm_service_cpu \
-  --session-timeout 600 \
-  --max-sessions 1024
-```
-
-**要点**：
-
-- 会话回收采用**双条件判断**：`空闲时长 > session_timeout` **且** `客户端离线`。
-- 客户端在线时，会话不会因空闲被回收；客户端离线且超时才会被回收。
+进入交互式命令行，输入问题测试，`/quit` 退出。
 
 ---
 
-## 七、故障排查
+## 八、运行时行为说明
+
+### 8.1 多会话并发
+
+每个 `generate` 请求独立 `session_id`、独立线程。多客户端并发**互不干扰**。每个会话的状态（`client_name`、`start_time`、`status`）由内部字典跟踪。
+
+### 8.2 流式消息协议
+
+服务端通过 `llm_stream` Notify API 推送以下结构化 JSON：
+
+| 类型 | 字段 | 含义 |
+|------|------|------|
+| `chunk` | `session_id`, `text` | 正文流 |
+| `think` | `session_id`, `text` | 思考流 |
+| `finish` | `session_id`, `reason` | 生成结束 |
+| `error` | `session_id`, `message` | 服务端错误 |
+| `closed` | `session_id`, `reason` | 会话关闭 |
+
+### 图 5：消息类型与客户端行为
+
+```mermaid
+flowchart LR
+    A["chunk<br/>正文流"] --> B["客户端追加显示"]
+    C["think<br/>思考流"] --> D["灰色显示 / 折叠"]
+    E["finish<br/>生成结束"] --> F["更新状态栏"]
+    G["error<br/>服务端错误"] --> H["错误提示"]
+    I["closed<br/>会话关闭"] --> J["清理会话列表"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style C fill:#5D6D7E,stroke:#2C3E50,stroke-width:3px,color:#FFFFFF
+    style E fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style G fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style I fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+```
+
+### 8.3 退出
+
+- 按 `Ctrl+C`：优雅退出，打印 `[Service] Shutting down...`，清理资源。
+- 通过 `atexit` 确保 `cleanup()` 被调用。
+- **不建议**直接关窗口或 `kill -9`，可能残留 IPC 队列。
+
+---
+
+## 九、故障排查
 
 ### Q1：启动报 `Model file not found`
-
-**原因**：模型文件不在预期位置。
 
 **排查**：
 
@@ -898,7 +875,7 @@ llm_service_cpu.exe `
 Get-ChildItem *.gguf
 
 # 或用绝对路径启动
-llm_service_cpu.exe --model-path D:\models\qwen2.5-7b.gguf
+.\llm_service.exe --model-path D:\models\NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
 ```
 
 **Linux（Shell）**：
@@ -908,12 +885,10 @@ llm_service_cpu.exe --model-path D:\models\qwen2.5-7b.gguf
 ls -lh *.gguf
 
 # 或用绝对路径启动
-./llm_service_cpu --model-path /data/models/qwen2.5-7b.gguf
+./llm_service --model-path /data/models/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
 ```
 
 ### Q2：启动报 `Failed to load LingoFuse64.dll`
-
-**原因**：动态库不在 `PATH` 或 `exe` 同目录。
 
 **解决**：
 
@@ -922,7 +897,7 @@ ls -lh *.gguf
 ```powershell
 # 把动态库所在目录加入临时 PATH
 $env:PATH = "D:\LingoFuse\Binary;$env:PATH"
-llm_service_cpu.exe
+.\llm_service.exe
 ```
 
 **Linux（Shell）**：
@@ -930,42 +905,45 @@ llm_service_cpu.exe
 ```bash
 # 把动态库所在目录加入临时 LD_LIBRARY_PATH
 export LD_LIBRARY_PATH=/opt/LingoFuse/Binary:$LD_LIBRARY_PATH
-./llm_service_cpu
+./llm_service
 ```
 
 ### Q3：显存不足（`CUDA out of memory`）
 
-**原因**：`--gpu-layers` 设置过大，或 `--context-size` 太大。
-
 **解决**：
 
 **Windows（PowerShell）**：
 
 ```powershell
 # 逐步降低 GPU 层数
-llm_service_cu124.exe --gpu-layers 20
-llm_service_cu124.exe --gpu-layers 10
-llm_service_cu124.exe --gpu-layers 0
+.\llm_service.exe --gpu-layers 20
+.\llm_service.exe --gpu-layers 10
+.\llm_service.exe --gpu-layers 0
 
 # 或降低上下文
-llm_service_cu124.exe --context-size 4096
+.\llm_service.exe --context-size 4096
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 逐步降低 GPU 层数
-./llm_service_cu124 --gpu-layers 20
-./llm_service_cu124 --gpu-layers 10
-./llm_service_cu124 --gpu-layers 0
+./llm_service --gpu-layers 20
+./llm_service --gpu-layers 10
+./llm_service --gpu-layers 0
 
 # 或降低上下文
-./llm_service_cu124 --context-size 4096
+./llm_service --context-size 4096
 ```
 
-### Q4：CPU 太慢 / 风扇狂转
+### Q4：内存不足（纯 CPU 场景）
 
-**原因**：`--threads` 设置过大。
+20 GB 模型 + KV cache 需要 32 GB 以上内存。若内存不足：
+
+- 降低 `--context-size`（如 4096）。
+- 改用 `llm_proxy.exe` 转发到 LM Studio（LM Studio 可在有独显的机器上运行）。
+
+### Q5：CPU 太慢 / 风扇狂转
 
 **解决**：
 
@@ -973,93 +951,52 @@ llm_service_cu124.exe --context-size 4096
 
 ```powershell
 # 减到物理核心数的一半
-llm_service_cpu.exe --threads 4
+.\llm_service.exe --threads 4
 ```
 
 **Linux（Shell）**：
 
 ```bash
 # 减到物理核心数的一半
-./llm_service_cpu --threads 4
+./llm_service --threads 4
 ```
 
-### Q5：客户端收不到流
+### Q6：客户端收不到流
 
 **排查顺序**：
 
-1. **客户端是否用 `llm_stream` 注册了 Notify 回调？**
-2. **`client_name` 是否在 `PrepareDone` 之后生成？**（`generate_app_name()` 必须在 `LF_PrepareDone()` 成功后调用）
-3. **服务端 `--notify-api` 是否被改过？** 若改过，客户端也要相应调整。
-4. **服务端日志是否出现 `no found app(...)`？** 表示客户端名字不对。
+1. 客户端是否用 `llm_stream` 注册了 Notify 回调？
+2. `client_name` 是否在 `PrepareDone` 之后生成？
+3. 服务端 `--notify-api` 是否被改过？
+4. 服务端日志是否出现 `no found app(...)`？
 
-**Windows（PowerShell）**：
+**用 debug 日志排查**：
 
 ```powershell
-# 用 debug 日志排查
-llm_service_cpu.exe --debug
+.\llm_service.exe --debug
 ```
 
-**Linux（Shell）**：
-
-```bash
-# 用 debug 日志排查
-./llm_service_cpu --debug
-```
-
-### Q6：`Context length exceeded`
-
-**原因**：输入过长。
+### Q7：`Context length exceeded`
 
 **解决**：
 
-**Windows（PowerShell）**：
-
 ```powershell
 # 降低单次最大生成 token
-llm_service_cpu.exe --max-tokens 2048
+.\llm_service.exe --max-tokens 2048
 
 # 或调大上下文（注意内存占用）
-llm_service_cpu.exe --context-size 16384
+.\llm_service.exe --context-size 16384
 ```
 
-**Linux（Shell）**：
-
-```bash
-# 降低单次最大生成 token
-./llm_service_cpu --max-tokens 2048
-
-# 或调大上下文（注意内存占用）
-./llm_service_cpu --context-size 16384
-```
-
-### Q7：端口 / IPC 队列被占用
+### Q8：端口 / IPC 队列被占用
 
 **现象**：日志报 `Queue "llm_service0" is already occupied`。
 
-**原因**：同机已有服务在监听 `ipc:llm_service`。
-
 **解决**：
-
-**Windows（PowerShell）**：
 
 ```powershell
-llm_service_cpu.exe --endpoint ipc:llm_service_2
+.\llm_service.exe --endpoint ipc:llm_service_2
 ```
-
-**Linux（Shell）**：
-
-```bash
-./llm_service_cpu --endpoint ipc:llm_service_2
-```
-
-### Q8：进程退不干净
-
-**原因**：非优雅退出导致资源未释放。
-
-**解决**：
-
-- 优先使用 `Ctrl+C` 优雅退出。
-- 若残留 IPC 队列，重启系统或在任务管理器中结束所有 LingoFuse 相关进程。
 
 ### Q9：会话被意外回收
 
@@ -1074,12 +1011,20 @@ llm_service_cpu.exe --endpoint ipc:llm_service_2
 
 若客户端实际在线但会话仍被回收，可能是 `check_app` 缓存延迟（约 3 秒）导致误判。可调大 `--session-timeout` 缓解。
 
+### Q10：llm_service 启动后立刻退出
+
+**排查**：
+
+- 是否缺少模型文件（见 Q1）。
+- 是否有另一个 `llm_service` 或 `llm_proxy` 已占用 `ipc:llm_service`（见 Q8）。
+- 查看窗口中的错误信息，或者截图发给豆包。
+
 ---
 
-## 八、启动参数速查
+## 十、启动参数速查
 
 ```
-llm_service_*.exe [OPTIONS]      # Windows
+llm_service.exe [OPTIONS]        # Windows
 ./llm_service [OPTIONS]          # Linux
 
 模型与推理
@@ -1115,35 +1060,19 @@ LingoFuse 服务
 
 ---
 
-## 九、会话回收策略（重点说明）
+## 十一、相关文档（同目录）
 
-`llm_service` 的 watchdog 采用**双条件回收**策略：
-
-| 条件 | 状态 | 结果 |
-|------|------|------|
-| 空闲 > `session_timeout` | 客户端在线 | **保留会话**（客户端稍后可继续） |
-| 空闲 > `session_timeout` | 客户端离线 | **回收会话**（reason = `timeout+offline`） |
-| 空闲 ≤ `session_timeout` | 任意 | 保留 |
-| 会话正在生成（`status != idle`） | 任意 | 保留（watchdog 不介入） |
-
-**为什么这样设计**：
-
-- 客户端偶尔断开重连（笔记本休眠、网络抖动、客户端重启），如果仅按空闲时长回收，客户端只要暂停超过阈值就会丢失整个对话历史。
-- 加上"客户端离线"这一条件后，只要客户端还在线，会话就一直保留；只有当客户端真正离线（进程被杀、机器关机）且空闲超时，会话才被回收。
-
-**watchdog 扫描周期**：每 5 秒一次。`check_app` 缓存更新延迟约 3 秒，因此刚断开的客户端在下一轮扫描时会被正确判定为离线。
+| 文档 | 说明 |
+|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | LLM 工具链版本演进与架构决策（历史参考） |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
 ---
 
-## 十、相关文档
-
-- **服务端命令行手册**：`LingoFuse_LLM_Proxy_CLI_Guide.md` —— `llm_proxy` 的对应使用手册
-- **兼容性指南**：`LingoFuse_LLM_Proxy_Compatibility_Guide.md` —— 支持的全部 OpenAI 兼容后端清单
-- **流式开发要点**：`LingoFuse_Python_Streaming_LLM_Guide.md` —— 客户端侧流式接入要点
-- **模型下载指南**：`Qwen2.5-7B-Instruct-Q4_K_M.md` —— 模型下载与部署
-
----
-
-**文档版本**：V1.0  
+**文档版本**：V2.1（仅保留同目录链接）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）
