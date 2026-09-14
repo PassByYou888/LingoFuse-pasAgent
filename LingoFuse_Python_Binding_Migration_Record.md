@@ -26,7 +26,7 @@
 > **注意**：本文档为**历史参考**。最新的 LLM 工具链演进请查阅 `src/LingoFuse_LLM_Service_Work_Summary.md`（v5.0）。
 
 **本次更新（V2.1）** 修正内容：
-- 修正文档中所有过时文件名引用：`mcp_server.py` → `mcp_api_tool.py`，`mcp_proxy.py` → `mcp_api_proxy.py`，`build_mcp_server.ps1` → `build_mcp_api_tool.ps1`，`MCP_SERVER_DOUBAO_GUIDE.md` → `mcp_api_tool_DOUBAO_GUIDE.md`。
+- 修正文档中所有过时文件名引用：`mcp_server.py` → `mcp_api_tool.py`，`mcp_proxy.py` → `mcp_api_proxy.py`，`build_mcp_server.ps1` → `build_mcp_api_tool.ps1`，`MCP_SERVER_DOUBAO_GUIDE.md` → `mcp_api_tool_doubao_guide.md`。
 - 更新交付物清单中的版本号至截至 2026-09-14 的实际值（`mcp_api_tool.py` v2.42、`language_middleware.py` v7.3、`generate_agent_json.py` v2.5、`mcp_api_proxy.py` v2.5）。
 - 补入此前遗漏的 **LTB（`llm_proxy_tool.py`）** 组件，并同步更新相关章节与交付物清单。
 - 补全 **`LingoFuse_LLM_*` 系列文档**（现位于 `src/`）在文档清单中的条目，移除对不存在文件的引用。
@@ -615,7 +615,7 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 | 文档 | 版本 | 面向对象 |
 |------|------|----------|
 | `readme.md` | — | 全体用户 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | v5.0 | 零基础新手 |
+| `mcp_api_tool_doubao_guide.md` | v5.0 | 零基础新手 |
 | `Build_Guide.md` | V4.0 | 需要编译的开发者 |
 | `Dependency_Installation_Guide.md` | V3.0 | 依赖安装的开发者 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | V2.0 | 推荐模型下载与部署 |
@@ -808,7 +808,7 @@ mindmap
 | 文档 | 说明 |
 |------|------|
 | `readme.md` | 项目总览与闭环架构 |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 | `LingoFuse_mcp_api_tool_Implementation_Memo.md` | MCP 网关实施备忘 |
 | `Build_Guide.md` | 编译指南 |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
