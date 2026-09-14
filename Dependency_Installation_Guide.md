@@ -1,23 +1,93 @@
-# Dependency_Installation_Guide.md
+# LingoFuse-pasAgent 项目依赖安装与编译指南
 
-## LingoFuse-pasAgent 项目依赖安装与编译指南
-
-本文档详细说明编译和运行 **LingoFuse-pasAgent** 各组件所需的依赖包安装步骤，涵盖 Python 环境、Pascal 编译环境以及运行时动态库。无论您是开发者准备从源码编译，还是最终用户准备运行已编译的 EXE，均可参考本指南。
+> **文档版本**：V3.0  
+> **最后更新**：2026-09-14  
+> **适用平台**：Windows / Linux / macOS  
+> **相关文档**（同目录）：
+> - 编译指南：`Build_Guide.md`
+> - MCP 新手指南：`MCP_SERVER_DOUBAO_GUIDE.md`
+> - 推荐模型：`NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`
+> - LLM 服务命令行（子目录）：`src/llm-service/LingoFuse_LLM_Service_CLI_guide.md`
+> - LLM 代理命令行（子目录）：`src/llm-service/LingoFuse_LLM_Proxy_CLI_Guide.md`
+> - 生态体系总览（子目录）：`src/llm-service/LingoFuse_LLM_Ecosystem_User_Guide.md`
 
 ---
 
-## 1. 概述
+## 阅读引导
+
+本文档介绍编译和运行 **LingoFuse-pasAgent** 各组件所需的依赖包安装步骤。建议按以下顺序阅读：
+
+1. **想快速装好环境** → 直接读第三章「Python 依赖安装」和第四章「获取动态库」。
+2. **想了解 Pascal 编译环境** → 读第二章「环境准备」和第五章「Pascal 编译环境」。
+3. **想验证是否装好** → 读第七章「验证安装」。
+4. **遇到问题** → 读第八章「常见问题」。
+
+如果你只是想**运行**预编译包而不想自己编译，请直接下载预编译包并按 `MCP_SERVER_DOUBAO_GUIDE.md` 操作，**无需**阅读本文档大部分内容。
+
+---
+
+## 一、概述
 
 本项目包含两类主要组件：
 
-- **Python 组件**（如 `mcp_server.py`、`bridge.py`、`llm_service.py` 等），依赖 Python 第三方包。
+- **Python 组件**（如 `mcp_server.py`、`llm_service.py`、`llm_proxy.py`、`bridge.py` 等），依赖 Python 第三方包。
 - **Pascal 组件**（如 `pascal_agent_service.lpr`、`pascal_agent_api.lpr`、`HealthCheck.lpr`），依赖 Free Pascal 编译器和 Lazarus IDE。
 
 **所有组件均依赖 LingoFuse 动态库**（`LingoFuse64.dll` / `liblingofuse.so`），该库由 LingoFuse 核心项目提供，不包含在本仓库中。
 
+### 图 1：依赖层次
+
+```mermaid
+flowchart TB
+    subgraph TOP["🎯 运行时依赖"]
+        A["LingoFuse64.dll"]
+        B["z_ipc_64.dll"]
+        C["VC++ Redistributable"]
+    end
+
+    subgraph PY["🐍 Python 组件"]
+        D["mcp_server.exe"]
+        E["llm_service.exe"]
+        F["llm_proxy.exe"]
+    end
+
+    subgraph PAS["🅿️ Pascal 组件"]
+        G["pascal_agent_service.exe"]
+        H["pascal_agent_api.exe"]
+    end
+
+    A --> D
+    A --> E
+    A --> F
+    A --> G
+    A --> H
+    B --> D
+    B --> E
+    B --> F
+    B --> G
+    B --> H
+    C --> D
+    C --> E
+    C --> F
+    C --> G
+    C --> H
+
+    style TOP fill:#0D2F52,stroke:#000000,stroke-width:4px,color:#FFFFFF
+    style PY fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style PAS fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style A fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style B fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style D fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style E fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style F fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style G fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style H fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+```
+
 ---
 
-## 2. 环境准备
+## 二、环境准备
 
 ### 2.1 Python 环境
 
@@ -31,9 +101,27 @@
 
 > **注意**：本项目中的 Pascal 项目使用 Lazarus 项目文件（`.lpi`），**强烈建议使用 `lazbuild` 或 Lazarus IDE 进行编译**，而不是直接调用 `fpc`。因为项目包含复杂的依赖路径和单元搜索路径，`lazbuild` 能自动读取并处理这些配置。
 
+### 图 2：环境准备流程
+
+```mermaid
+flowchart LR
+    A["安装 Python"] --> B["安装 PyInstaller"]
+    B --> C["安装 Python 依赖"]
+    C --> D["安装 Lazarus"]
+    D --> E["部署 LingoFuse 动态库"]
+    E --> F["✅ 环境就绪"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style C fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style D fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style F fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
+
 ---
 
-## 3. Python 依赖安装
+## 三、Python 依赖安装
 
 ### 3.1 快速安装（使用 `requirements.txt`）
 
@@ -55,10 +143,40 @@ pip install -r requirements.txt
 | `fastmcp` | MCP 协议核心库（`mcp_server.py` 依赖） | **必需**（若使用 MCP Server） |
 | `pydantic` | FastMCP 依赖的数据验证库 | **必需** |
 | `flask` | HTTP 网关（`bridge.py`） | 若使用 bridge 则必需 |
-| `requests` | HTTP 客户端（测试脚本用） | 可选 |
+| `requests` | HTTP 客户端（`llm_proxy` 探测 `/v1/models`） | 若使用 llm_proxy 则必需 |
 | `llama-cpp-python` | LLM 服务（`llm_service.py` CPU 版） | 若需本地 LLM 则必需 |
-| `transformers` + `torch` | LLM 服务（替代后端） | 可选 |
+| `jinja2` | 自定义聊天模板 | 若使用自定义模板则必需 |
 | `pyinstaller` | 打包工具（仅开发者需要） | 编译时必需 |
+
+### 图 3：按组件选择依赖
+
+```mermaid
+flowchart TD
+    START["我要用哪些组件?"] --> Q1{"用 MCP 网关?"}
+    Q1 -->|是| A1["安装 fastmcp<br/>安装 pydantic"]
+    Q1 -->|否| Q2{"用 llm_service?"}
+    A1 --> Q2
+    Q2 -->|是| A2["安装 llama-cpp-python<br/>安装 jinja2"]
+    Q2 -->|否| Q3{"用 llm_proxy?"}
+    A2 --> Q3
+    Q3 -->|是| A3["安装 requests"]
+    Q3 -->|否| Q4{"用 bridge?"}
+    A3 --> Q4
+    Q4 -->|是| A4["安装 flask"]
+    Q4 -->|否| DONE["✅ 依赖就绪"]
+    A4 --> DONE
+
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style Q1 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q2 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q3 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q4 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
+    style A2 fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
+    style A3 fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
+    style A4 fill:#1E8449,stroke:#0E4D2A,stroke-width:2px,color:#FFFFFF
+    style DONE fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
+```
 
 ### 3.3 安装命令示例
 
@@ -72,19 +190,24 @@ pip install flask
 # LLM 服务（CPU 版，使用 llama.cpp）
 pip install llama-cpp-python
 
-# LLM 服务（使用 transformers + PyTorch，需 CUDA 支持时可安装 torch 的 CUDA 版本）
-pip install transformers torch
+# LLM 服务（GPU 版，示例 CUDA 12.4）
+pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+
+# 自定义聊天模板
+pip install jinja2
+
+# HTTP 客户端（llm_proxy 探测 /v1/models）
+pip install requests
 
 # 打包工具（仅编译 EXE 时）
 pip install pyinstaller
-
-# 测试工具（可选）
-pip install requests
 ```
+
+> **`llama-cpp-python` 详细安装**：包括各后端 wheel 源、社区预编译包、常见问题，详见 `src/llm-service/llama_cpp_python_guide.md`。
 
 ---
 
-## 4. 获取 LingoFuse 动态库
+## 四、获取 LingoFuse 动态库
 
 所有 EXE 和 Python 脚本运行时都需要 **LingoFuse 动态库**。该库不包含在本仓库中，需从 [LingoFuse 仓库](https://github.com/PassByYou888/LingoFuse) 获取。
 
@@ -98,28 +221,83 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 2. 将 LingoFuse 的 `Binary` 目录（或放置动态库的目录）加入系统 `PATH`。
 
-   - **Windows**（PowerShell）：
+   - **Windows**（PowerShell，临时）：
      ```powershell
      $env:PATH = "D:\path\to\LingoFuse\Binary;$env:PATH"
      ```
-     或者永久设置：系统属性 → 环境变量 → 编辑 `Path`。
-
+   - **Windows**（永久）：系统属性 → 环境变量 → 编辑 `Path`。
    - **Linux / macOS**：
      ```bash
      export PATH=/path/to/LingoFuse/Binary:$PATH
      ```
 
-   这样系统就能直接找到 `LingoFuse64.dll` / `liblingofuse.so`，无需复制到每个项目目录。
-
-### 4.2 或者：将动态库复制到 EXE 同目录
+### 4.2 备选方案：复制到 EXE 同目录
 
 如果不想修改 PATH，可以将动态库复制到每个 EXE 所在目录（例如 `src` 下编译出的 `mcp_server.exe`、`pascal_agent_service.exe` 等）。
 
+### 图 4：动态库部署决策
+
+```mermaid
+flowchart TD
+    START["需要部署动态库"] --> Q1{"是否跨多个 EXE 使用?"}
+    Q1 -->|是| A1["加入系统 PATH<br/>（一劳永逸）"]
+    Q1 -->|否| Q2{"是否只在一个目录?"}
+    Q2 -->|是| A2["复制到 EXE 同目录"]
+    Q2 -->|否| A1
+
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style Q1 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q2 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style A2 fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+```
+
+### 4.3 ⚠️ 运行环境依赖
+
+预编译 DLL 使用 **Visual Studio 2022** 编译，运行时需要安装 **VS2022 可再发行组件（VC++ Redistributable）**。
+
+请从微软官方下载并安装对应架构的版本：
+
+- [VC++ Redistributable for Visual Studio 2022 (x86/x64)](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)
+
 ---
 
-## 5. 编译指南
+## 五、Pascal 编译环境
 
-### 5.1 Python 组件编译（生成 EXE）
+### 5.1 安装 Lazarus
+
+- 下载 Lazarus 安装包：[lazarus-ide.org](https://lazarus-ide.org)
+- 推荐版本：**Lazarus 4.8** 或更高，自带 FPC 3.2.2+
+- 安装时建议将 Lazarus 安装到 `C:\lazarus`
+
+### 5.2 配置环境变量
+
+将 Lazarus 的 FPC 目录添加到系统 `PATH`，例如：
+
+```cmd
+set PATH=C:\lazarus\fpc\3.2.2\bin\x86_64-win64;%PATH%
+```
+
+### 5.3 验证编译环境
+
+```cmd
+lazbuild.exe --version
+fpc -iV
+```
+
+应正常输出版本信息。
+
+### 5.4 为什么不推荐直接 `fpc` 编译？
+
+- 项目依赖 Z 框架等大量外部单元，路径配置复杂，`lazbuild` 能正确读取 `.lpi` 中的搜索路径。
+- 直接调用 `fpc` 需要手动指定大量 `-Fu` 参数，极易出错。
+- 使用 `lazbuild` 可以确保与 Lazarus IDE 编译结果一致，减少兼容性问题。
+
+---
+
+## 六、编译指南
+
+### 6.1 Python 组件编译（生成 EXE）
 
 在 `src` 目录下，提供了 PowerShell 脚本用于打包 Python 组件：
 
@@ -127,7 +305,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 |------|------|------|
 | `build_mcp_server.ps1` | 编译 `mcp_server.exe` | 打包 FastMCP、pydantic、lingofuse 等依赖 |
 | `build_bridge.ps1` | 编译 `bridge.exe` | 打包 Flask 和 lingofuse |
-| `build_llm_service.ps1` | 编译 `llm_service.exe` | 打包 llama_cpp / lingofuse（可针对不同后端生成多个版本） |
+| `build_llm_service.ps1` | 编译 `llm_service.exe`、`llm_proxy.exe`、`llm_test.exe` | 打包 llama_cpp / lingofuse |
 
 **使用方法**（在 `src` 目录打开 PowerShell）：
 
@@ -139,7 +317,7 @@ git clone --recursive https://github.com/PassByYou888/LingoFuse.git
 
 > **注意**：编译前确保已安装 `pyinstaller` 和相应 Python 依赖（如 `fastmcp`、`pydantic`、`flask`、`llama-cpp-python` 等）。
 
-### 5.2 Pascal 组件编译
+### 6.2 Pascal 组件编译
 
 **必须使用 Lazarus 或 `lazbuild`**，项目提供了一键脚本 `build_pascal_agent.bat`（在 `src` 目录）：
 
@@ -165,23 +343,36 @@ build_pascal_agent.bat
 
 如果 Lazarus 未配置到 PATH，请用 Lazarus IDE 打开相应 `.lpi` 文件，点击“编译”即可。
 
-**为什么不推荐直接 `fpc` 编译？**
+### 图 5：编译流程
 
-- 项目依赖 Z 框架等大量外部单元，路径配置复杂，`lazbuild` 能正确读取 `.lpi` 中的搜索路径。
-- 直接调用 `fpc` 需要手动指定大量 `-Fu` 参数，极易出错。
-- 使用 `lazbuild` 可以确保与 Lazarus IDE 编译结果一致，减少兼容性问题。
+```mermaid
+flowchart LR
+    A["安装依赖"] --> B["编译 Python"]
+    A --> C["编译 Pascal"]
+    B --> D["dist 目录"]
+    C --> D
+    D --> E["复制动态库"]
+    E --> F["✅ 可分发"]
+
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style D fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style F fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+```
 
 ---
 
-## 6. 验证安装
+## 七、验证安装
 
-### 6.1 验证 Python 环境
+### 7.1 验证 Python 环境
 
 ```bash
 python -c "import fastmcp; import pydantic; print('OK')"
 ```
 
-### 6.2 验证 Pascal 编译环境
+### 7.2 验证 Pascal 编译环境
 
 编译成功 `pascal_agent_service.exe` 后，运行：
 
@@ -191,46 +382,111 @@ pascal_agent_service.exe
 
 若能看到 `[MAIN] Service is running...` 则说明环境配置正确。
 
-### 6.3 验证 LingoFuse 动态库
+### 7.3 验证 LingoFuse 动态库
 
 运行任何生成的 EXE 或 Python 脚本，若提示 `Failed to load LingoFuse64.dll`，则说明动态库未找到，请检查 PATH 或复制动态库。
 
+### 7.4 验证 LLM 推理环境
+
+如果安装了 `llama-cpp-python`：
+
+```bash
+python -c "from llama_cpp import Llama; print('安装成功！')"
+```
+
+若需检查 GPU 支持：
+
+```bash
+python -c "import llama_cpp; print(f'版本: {llama_cpp.__version__}'); print(f'GPU支持: {llama_cpp.llama_supports_gpu_offload()}')"
+```
+
 ---
 
-## 7. 常见问题
+## 八、常见问题
 
-### Q1: pip 安装失败（网络问题）
+### Q1：pip 安装失败（网络问题）
+
+**解决**：
 
 - 使用国内镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple 包名`
 - 或使用代理。
 
-### Q2: 运行 EXE 提示“缺少 DLL”
+### Q2：运行 EXE 提示“缺少 DLL”
+
+**解决**：
 
 - 将 `LingoFuse64.dll`（或 `liblingofuse.so`）复制到 EXE 目录，或将其所在目录添加到系统 `PATH`。
 - 确保动态库与 EXE 架构一致（64 位 vs 32 位）。
+- 确认已安装 [VC++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)。
 
-### Q3: 编译 Pascal 项目时提示“找不到单元”
+### Q3：编译 Pascal 项目时提示“找不到单元”
+
+**解决**：
 
 - 确保已正确配置 Lazarus 的项目搜索路径（`.lpi` 文件中已定义）。
 - 若使用 `build_pascal_agent.bat`，请确认 `lazbuild.exe` 在 PATH 中，或使用绝对路径调用。
 
-### Q4: PyInstaller 打包后运行报 `ModuleNotFoundError`
+### Q4：PyInstaller 打包后运行报 `ModuleNotFoundError`
+
+**解决**：
 
 - 可能需要增加 `--hidden-import` 参数，例如 `--hidden-import language_middleware`。
 - 确保 `lingofuse` 包被包含在 `--add-data` 中（参考脚本）。
 
+### Q5：`llama-cpp-python` 安装失败
+
+**解决**：
+
+- 确认已安装 C 编译器（Windows 需要 Visual Studio 或 MinGW）。
+- 使用预编译 wheel 跳过源码编译：
+  ```bash
+  pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+  ```
+- 详细排查见 `src/llm-service/llama_cpp_python_guide.md`。
+
+### Q6：FPC 版本不匹配
+
+**解决**：
+
+- 所有平台必须使用**同一构建批次**的 FPC 3.3.1 预编译包，否则会出现 `PPU version mismatch`。
+- 具体切换教程参考项目根目录的 `Lazarus_Change_FPC.md`。
+
 ---
 
-## 8. 总结
+## 九、总结
 
 - **依赖**：所有组件需 LingoFuse 动态库，推荐通过克隆 LingoFuse 仓库并添加 PATH 来部署。
 - **Python 编译**：使用 `src` 下的 `*.ps1` 脚本（PyInstaller）。
 - **Pascal 编译**：使用 `build_pascal_agent.bat`（基于 `lazbuild`），**不建议直接使用 `fpc`**。
+- **推荐模型**：`NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf`，详见 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`。
 
 如有任何未覆盖的问题，请参考项目文档或联系开发团队。
 
 ---
 
-**文档版本**：V2.0  
-**最后更新**：2026-09-10  
-**维护者**：LingoFuse-pasAgent 团队
+## 十、相关文档
+
+### 根目录文档
+
+| 文档 | 说明 |
+|------|------|
+| `Build_Guide.md` | 编译指南（含更多脚本细节） |
+| `MCP_SERVER_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
+| `readme.md` | 项目总览与闭环架构 |
+
+### 子目录文档
+
+| 文档 | 位置 | 说明 |
+|------|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | `src/llm-service/` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `src/llm-service/` | LLM 服务命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `src/llm-service/` | LLM 代理命令行手册 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | `src/llm-service/` | 踩坑大全 |
+| `llama_cpp_python_guide.md` | `src/llm-service/` | `llama-cpp-python` 安装与使用 |
+
+---
+
+**文档版本**：V3.0（高对比配色，拆分图表）  
+**维护者**：LingoFuse-pasAgent 团队  
+**反馈**：问题提 Issue，急事加 Q（600585）
