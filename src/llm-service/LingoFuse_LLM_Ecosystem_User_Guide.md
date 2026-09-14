@@ -1,17 +1,32 @@
 # LingoFuse LLM 生态体系使用指南
 
 > **文档名**：`LingoFuse_LLM_Ecosystem_User_Guide.md`  
-> **版本**：v2.0  
-> **最后更新**：2026-09-13  
-> **适用组件**：`llm_service.py`、`llm_proxy.py`、`llm_test.py`、Pascal 客户端（`llm_client.pas` / `llm_tool_frm.pas`）  
-> **相关文档**：  
-> - [`LingoFuse_LLM_Service_CLI_guide.md`](LingoFuse_LLM_Service_CLI_guide.md)  
-> - [`LingoFuse_LLM_Proxy_CLI_Guide.md`](LingoFuse_LLM_Proxy_CLI_Guide.md)  
-> - [`LingoFuse_LLM_Proxy_Compatibility_Guide.md`](LingoFuse_LLM_Proxy_Compatibility_Guide.md)  
-> - [`LingoFuse_Python_Streaming_LLM_Guide.md`](LingoFuse_Python_Streaming_LLM_Guide.md)  
-> - [`LingoFuse_LLM_Pitfalls_For_AI.md`](LingoFuse_LLM_Pitfalls_For_AI.md)  
-> - [`LingoFuse_LLM_Service_Work_Summary.md`](LingoFuse_LLM_Service_Work_Summary.md)  
-> - [`llama_cpp_python_guide.md`](llama_cpp_python_guide.md)
+> **版本**：v3.0  
+> **最后更新**：2026-09-14  
+> **适用组件**：`llm_service.exe`、`llm_proxy.exe`、`llm_test.exe`、Pascal 客户端  
+> **相关文档**（同目录）：
+> - LLM 服务命令行手册：`LingoFuse_LLM_Service_CLI_guide.md`
+> - LLM 代理命令行手册：`LingoFuse_LLM_Proxy_CLI_Guide.md`
+> - 代理兼容性指南：`LingoFuse_LLM_Proxy_Compatibility_Guide.md`
+> - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
+> - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
+> - llama-cpp-python 安装：`llama_cpp_python_guide.md`
+
+---
+
+## 阅读引导
+
+本文档是 LingoFuse LLM 生态的**全局参考**。建议按以下顺序阅读：
+
+1. **想快速了解全貌** → 读第一章「体系全景」。
+2. **想选一个服务端** → 读第二章「两种服务端」。
+3. **想搭起来跑** → 读第三章「快速开始」。
+4. **想了解细节** → 读第四、五章「服务端详解」「客户端详解」。
+5. **想知道协议和能力发现** → 读第六、七章。
+6. **想解决具体问题** → 直接读第九章「故障排查」，或翻同目录 `LingoFuse_LLM_Pitfalls_For_AI.md`。
+7. **想了解版本演进** → 读同目录 `LingoFuse_LLM_Service_Work_Summary.md`。
+
+如果只想尽快跑通，跳到第三章即可。
 
 ---
 
@@ -19,48 +34,79 @@
 
 LingoFuse LLM 生态是一套跨语言、流式、多会话的大模型调用方案。它把大模型能力封装成 **LingoFuse 服务端**，任何支持 LingoFuse 的客户端都能像调用本地函数一样调用大模型，并实时接收流式输出。
 
+为避免一张图信息过载，按**层次**拆分为两张小图。
+
+### 图 1：生态全景（客户端 / 核心 / 服务端 / 后端）
+
 ```mermaid
 flowchart TB
-    subgraph CLIENTS["🖥️ 客户端生态"]
-        PY["🐍 Python 客户端<br/>llm_test.py"]
-        PAS["🅿️ Pascal GUI 客户端<br/>llm_tool_frm.pas"]
-        ANY["🌍 任意 LingoFuse 客户端<br/>C++ / Go / Rust / ..."]
+    subgraph CLIENTS["🖥️ 客户端"]
+        A1["🐍 Python 客户端<br/>llm_test.exe"]
+        A2["🅿️ Pascal GUI 客户端"]
+        A3["🌍 任意 LingoFuse 客户端"]
     end
 
     subgraph CORE["⚡ LingoFuse 服务网格"]
-        GRID["C4 二进制 RPC<br/>Call + Notify"]
+        B1["C4 二进制 RPC<br/>Call + Notify"]
     end
 
-    subgraph SERVERS["🎯 服务端（兄弟关系，同一时刻只能运行一个）"]
-        LS["🟢 llm_service.py<br/>本地推理服务"]
-        LP["🟣 llm_proxy.py<br/>无状态转发代理"]
+    subgraph SERVERS["🎯 服务端（兄弟关系，同一时刻只运行一个）"]
+        C1["🟢 llm_service.exe<br/>本地推理"]
+        C2["🟣 llm_proxy.exe<br/>无状态转发"]
     end
 
     subgraph BACKENDS["🔌 后端生态"]
-        GGUF["📦 GGUF 模型<br/>llama.cpp"]
-        LMS["LM Studio"]
-        OL["Ollama"]
-        VLLM["vLLM / SGLang / TGI"]
-        CLOUD["DeepSeek / OpenRouter<br/>Groq / 智谱 / Moonshot ..."]
+        D1["📦 GGUF 模型<br/>llama.cpp"]
+        D2["LM Studio / Ollama"]
+        D3["vLLM / SGLang / TGI"]
+        D4["DeepSeek / OpenRouter<br/>Groq / 智谱 / Moonshot"]
     end
 
-    PY -->|Call + Notify| GRID
-    PAS -->|Call + Notify| GRID
-    ANY -->|Call + Notify| GRID
-    GRID -->|选一| LS
-    GRID -->|选一| LP
-    LS --> GGUF
-    LP -->|HTTP SSE| LMS
-    LP -->|HTTP SSE| OL
-    LP -->|HTTP SSE| VLLM
-    LP -->|HTTPS SSE| CLOUD
+    A1 -->|"Call + Notify"| B1
+    A2 -->|"Call + Notify"| B1
+    A3 -->|"Call + Notify"| B1
+    B1 -->|"选一"| C1
+    B1 -->|"选一"| C2
+    C1 --> D1
+    C2 -->|"HTTP SSE"| D2
+    C2 -->|"HTTP SSE"| D3
+    C2 -->|"HTTPS SSE"| D4
 
-    style CLIENTS fill:#D6EAF8,stroke:#1F618D,stroke-width:3px
-    style CORE fill:#FDEBD0,stroke:#B7791F,stroke-width:3px
-    style SERVERS fill:#E8DAEF,stroke:#6C3483,stroke-width:3px
-    style BACKENDS fill:#D5F5E3,stroke:#1E8449,stroke-width:3px
-    style LS fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
-    style LP fill:#8E44AD,stroke:#5B2C6F,stroke-width:4px,color:#FFFFFF
+    style CLIENTS fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style CORE fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style SERVERS fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style BACKENDS fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A2 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A3 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style B1 fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style C1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style C2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style D1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style D2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style D3 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style D4 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+```
+
+### 图 2：一次调用的完整链路
+
+```mermaid
+sequenceDiagram
+    participant U as 用户
+    participant C as 客户端
+    participant S as 服务端
+    participant B as 后端
+
+    U->>C: 提问
+    C->>S: Call generate()
+    S-->>C: 立即返回 session_id
+    S->>B: 请求推理
+    loop 流式生成
+        B-->>S: SSE token
+        S-->>C: Notify chunk / think
+    end
+    S-->>C: Notify finish
+    C-->>U: 显示完整回复
 ```
 
 **一句话总结**：客户端只管调 `generate`，服务端负责把请求变成真正的模型推理——本地跑也好，转发到 LM Studio / 云 API 也好，对客户端完全透明。
@@ -69,12 +115,12 @@ flowchart TB
 
 ## 二、两种服务端：兄弟关系
 
-### 2.1 定位对比
+### 图 3：定位对比
 
 ```mermaid
 mindmap
   root(("LLM 服务端"))
-    llm_service_py
+    llm_service_exe
       本地推理
         llama_cpp
         GGUF_模型
@@ -84,7 +130,7 @@ mindmap
       支持_set_system_message
       思考链解析
         think_标签状态机
-    llm_proxy_py
+    llm_proxy_exe
       无状态转发
         http_client
         SSE_流解析
@@ -98,11 +144,11 @@ mindmap
         OpenRouter
 ```
 
-### 2.2 能力矩阵
+### 图 4：能力矩阵
 
 ```mermaid
 flowchart LR
-    subgraph LS["🟢 llm_service.py（server_kind=service）"]
+    subgraph LS["🟢 llm_service.exe"]
         L1["generate ✅"]
         L2["create_session ✅"]
         L3["close_session ✅"]
@@ -113,7 +159,7 @@ flowchart LR
         L8["llm_stream ✅"]
     end
 
-    subgraph LP["🟣 llm_proxy.py（server_kind=proxy）"]
+    subgraph LP["🟣 llm_proxy.exe"]
         P1["generate ✅"]
         P2["create_session ✅"]
         P3["close_session ✅"]
@@ -124,27 +170,30 @@ flowchart LR
         P8["llm_stream ✅"]
     end
 
-    style LS fill:#D5F5E3,stroke:#1E8449,stroke-width:3px
-    style LP fill:#E8DAEF,stroke:#6C3483,stroke-width:3px
-    style L6 fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
-    style P6 fill:#E74C3C,stroke:#922B21,stroke-width:4px,color:#FFFFFF
+    style LS fill:#D5F5E3,stroke:#1E8449,stroke-width:3px,color:#0E4D2A
+    style LP fill:#F4ECF7,stroke:#5B2C6F,stroke-width:3px,color:#321640
+    style L6 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style P6 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-### 2.3 共存规则
+### 图 5：共存规则
 
 ```mermaid
 flowchart TB
     Q{"两个服务端能同时运行吗?"}
-    Q -->|默认端点相同| NO["❌ 不能<br/>ipc:llm_service 只能被一个服务端占用"]
-    Q -->|需要共存| YES["✅ 可以<br/>改用不同 endpoint + app-name"]
+    Q -->|"默认端点相同"| NO["❌ 不能<br/>ipc:llm_service 只能被一个占用"]
+    Q -->|"需要共存"| YES["✅ 可以<br/>改用不同 endpoint + app-name"]
 
     NO --> N1["启动第二个会报<br/>Queue already occupied"]
     YES --> Y1["llm_service:<br/>ipc:llm_service / LLM_Service"]
     YES --> Y2["llm_proxy:<br/>ipc:llm_proxy / LLM_Proxy"]
 
-    style Q fill:#F5A623,stroke:#B7791F,stroke-width:4px,color:#FFFFFF
-    style NO fill:#E74C3C,stroke:#922B21,stroke-width:4px,color:#FFFFFF
-    style YES fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
+    style Q fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style NO fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style YES fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style N1 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style Y1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style Y2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
 ```
 
 ---
@@ -158,17 +207,21 @@ flowchart TD
     START["🚀 我要用 LLM"] --> Q1{"有本地 GGUF 模型?"}
     Q1 -->|是| Q2{"想直接加载模型?"}
     Q1 -->|否| Q3{"有 LM Studio / Ollama / vLLM?"}
-    Q2 -->|是| LS["🟢 用 llm_service.py"]
-    Q2 -->|否| LP["🟣 用 llm_proxy.py"]
+    Q2 -->|是| LS["🟢 用 llm_service.exe"]
+    Q2 -->|否| LP["🟣 用 llm_proxy.exe"]
     Q3 -->|是| LP
     Q3 -->|否| Q4{"想用云 API?"}
     Q4 -->|是| LP
-    Q4 -->|否| DOWNLOAD["先下载模型<br/>见 llama_cpp_python_guide.md"]
+    Q4 -->|否| DL["先下载模型<br/>见 llama_cpp_python_guide.md"]
 
-    style START fill:#4A90E2,stroke:#1E3A8A,stroke-width:4px,color:#FFFFFF
-    style LS fill:#2ECC71,stroke:#1E8449,stroke-width:5px,color:#FFFFFF
-    style LP fill:#8E44AD,stroke:#5B2C6F,stroke-width:5px,color:#FFFFFF
-    style DOWNLOAD fill:#F5A623,stroke:#B7791F,stroke-width:4px,color:#FFFFFF
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style LS fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style LP fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style DL fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style Q1 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Q2 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Q3 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style Q4 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
 ```
 
 ### 3.2 启动流程
@@ -182,7 +235,7 @@ sequenceDiagram
     U->>S: 启动 llm_service 或 llm_proxy
     S->>S: 注册 ipc:llm_service
     S-->>U: 打印状态横幅，进入监听
-    U->>C: 启动 llm_test 或 llm_tool
+    U->>C: 启动 llm_test.exe
     C->>S: PrepareClient + PrepareDone
     C->>S: get_api_capabilities
     S-->>C: 能力矩阵
@@ -200,9 +253,9 @@ sequenceDiagram
 
 ## 四、服务端详解
 
-### 4.1 llm_service.py —— 本地推理服务
+### 4.1 llm_service.exe —— 本地推理服务
 
-#### 4.1.1 架构图
+#### 图 6：架构
 
 ```mermaid
 flowchart TB
@@ -242,15 +295,30 @@ flowchart TB
     TH --> SEQ
     WD -.->|监控| Q
 
-    style API fill:#D6EAF8,stroke:#1F618D,stroke-width:3px
-    style CONC fill:#FDEBD0,stroke:#B7791F,stroke-width:3px
-    style INFER fill:#D5F5E3,stroke:#1E8449,stroke-width:3px
-    style COMM fill:#E8DAEF,stroke:#6C3483,stroke-width:3px
+    style API fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style CONC fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style INFER fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style COMM fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A2 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A3 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A4 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A5 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A6 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style A7 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style CB fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style Q fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style W fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style WD fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style TPL fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style TH fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style LLM fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style SEQ fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
 ```
 
 **核心设计**：llama.cpp 的 `llama_context` 是**单线程状态机**（KV cache、采样器 RNG、BPE 状态共享），多线程直调会导致进程级 abort。所以所有推理请求都通过一个 FIFO 队列串行化到单个 worker 线程。
 
-#### 4.1.2 会话生命周期
+#### 图 7：会话生命周期
 
 ```mermaid
 stateDiagram-v2
@@ -265,18 +333,9 @@ stateDiagram-v2
     cancelled --> idle: 保留会话
     error --> idle: 保留会话
     closing --> [*]: 移除会话
-    note right of idle
-        可以被 watchdog
-        双条件回收
-    end note
-    note right of cancelled
-        cancel 只中断
-        当前生成
-        不关闭会话
-    end note
 ```
 
-#### 4.1.3 双条件回收策略
+#### 图 8：双条件回收策略
 
 ```mermaid
 flowchart TD
@@ -288,25 +347,28 @@ flowchart TD
     C3 -->|是| KEEP2["保留（客户端可能回来）"]
     C3 -->|否| CLOSE["回收会话<br/>reason=timeout+offline"]
 
-    style START fill:#4A90E2,stroke:#1E3A8A,stroke-width:4px,color:#FFFFFF
-    style SKIP fill:#95A5A6,stroke:#5D6D7E,stroke-width:3px,color:#FFFFFF
-    style KEEP fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
-    style KEEP2 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
-    style CLOSE fill:#E74C3C,stroke:#922B21,stroke-width:4px,color:#FFFFFF
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style C1 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C2 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C3 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style SKIP fill:#5D6D7E,stroke:#2C3E50,stroke-width:3px,color:#FFFFFF
+    style KEEP fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style KEEP2 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style CLOSE fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
 **为什么双条件**：客户端偶尔断开重连（笔记本休眠、网络抖动、客户端重启）。如果只按空闲时长回收，客户端暂停超过阈值就会丢失整个对话历史。加上“客户端离线”条件后，只要客户端还在线，会话就一直保留。
 
-**关键命令**：`--session-timeout`（默认 600 秒）、`--max-sessions`（默认 1024）、`--queue-max-size`（默认 256）。详见 [`LingoFuse_LLM_Service_CLI_guide.md`](LingoFuse_LLM_Service_CLI_guide.md)。
+**关键命令**：`--session-timeout`（默认 600 秒）、`--max-sessions`（默认 1024）、`--queue-max-size`（默认 256）。详见同目录 `LingoFuse_LLM_Service_CLI_guide.md`。
 
-### 4.2 llm_proxy.py —— 无状态转发代理
+### 4.2 llm_proxy.exe —— 无状态转发代理
 
-#### 4.2.1 架构图
+#### 图 9：架构
 
 ```mermaid
 flowchart LR
     subgraph IN["📥 LingoFuse 侧"]
-        CALL["LF Call: generate(...)"]
+        CALL["LF Call: generate()"]
         NOTIFY["LF Notify: llm_stream"]
     end
 
@@ -330,12 +392,20 @@ flowchart LR
     SSE --> EMIT
     EMIT --> NOTIFY
 
-    style PROXY fill:#E8DAEF,stroke:#6C3483,stroke-width:4px
-    style BACKEND fill:#8E44AD,stroke:#5B2C6F,stroke-width:4px,color:#FFFFFF
-    style HANDLER fill:#9B59B6,stroke:#6C3483,stroke-width:3px,color:#FFFFFF
+    style IN fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style PROXY fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style OUT fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style CALL fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style NOTIFY fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style HANDLER fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style SESSION fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style BACKEND fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style EMIT fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style HTTP fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style SSE fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
 ```
 
-#### 4.2.2 无状态语义
+#### 图 10：无状态语义
 
 ```mermaid
 sequenceDiagram
@@ -363,7 +433,7 @@ sequenceDiagram
 
 **要点**：代理不持有模型 KV cache；每轮请求都重新组装完整 messages 数组发给后端。后端视角是“无状态 HTTP”，客户端视角是“持久会话”。
 
-#### 4.2.3 SSE 传输层的坑
+#### 图 11：SSE 传输层的坑
 
 ```mermaid
 flowchart TB
@@ -379,9 +449,18 @@ flowchart TB
     A9 --> A10["终极方案: http.client"]
     A10 --> DONE["✅ 解决"]
 
-    style START fill:#E74C3C,stroke:#922B21,stroke-width:4px,color:#FFFFFF
-    style DONE fill:#2ECC71,stroke:#1E8449,stroke-width:5px,color:#FFFFFF
-    style A10 fill:#8E44AD,stroke:#5B2C6F,stroke-width:4px,color:#FFFFFF
+    style START fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style DONE fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style A10 fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style A1 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A2 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A3 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A4 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A5 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A6 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A7 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A8 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style A9 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
 ```
 
 **三层缓冲，缺一不可**：
@@ -393,9 +472,9 @@ flowchart TB
 | 3 | gzip 解码器攒够 deflate 块才吐 | `Accept-Encoding: identity` |
 | 4 | `urllib3` 内部预读 socket | 换 `http.client` |
 
-**最终方案**：`http.client` + `Accept-Encoding: identity` + `TCP_NODELAY`。详细排查过程见 [`LingoFuse_LLM_Pitfalls_For_AI.md`](LingoFuse_LLM_Pitfalls_For_AI.md) 中的 P0-4、P6-1、P6-2。
+**最终方案**：`http.client` + `Accept-Encoding: identity` + `TCP_NODELAY`。详细排查过程见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md` 中的 P0-4、P6-1、P6-2。
 
-#### 4.2.4 支持的后端
+#### 图 12：支持的后端分布
 
 ```mermaid
 pie showData
@@ -409,7 +488,7 @@ pie showData
     "嵌入/TTS/STT" : 12
 ```
 
-完整清单见 [`LingoFuse_LLM_Proxy_Compatibility_Guide.md`](LingoFuse_LLM_Proxy_Compatibility_Guide.md)。
+完整清单见同目录 `LingoFuse_LLM_Proxy_Compatibility_Guide.md`。
 
 ### 4.3 关键参数速查
 
@@ -449,31 +528,34 @@ mindmap
 
 ## 五、客户端详解
 
-### 5.1 Python 客户端：llm_test.py
+### 5.1 Python 客户端：llm_test.exe
 
 ```mermaid
 flowchart TB
-    START["启动 llm_test.py"] --> CONN["连接 ipc:llm_service"]
+    START["启动 llm_test.exe"] --> CONN["连接 ipc:llm_service"]
     CONN --> CAP["调用 get_api_capabilities<br/>缓存能力矩阵"]
     CAP --> MODE{"交互模式?"}
     MODE -->|是| REPL["进入 REPL"]
     MODE -->|否| ONESHOT["一次性提问"]
     REPL --> CMD{"用户输入"}
-    CMD -->|/new| NEW["创建新会话"]
-    CMD -->|/use| USE["切换会话"]
-    CMD -->|/sessions| LIST["列出会话"]
-    CMD -->|/close| CLOSE["关闭会话"]
-    CMD -->|/cancel| CANCEL["取消生成"]
-    CMD -->|/sys| SYS["检查能力后调用<br/>set_system_message"]
-    CMD -->|/health| HEALTH["查询服务端健康"]
-    CMD -->|/capabilities| CAPS["显示能力矩阵"]
-    CMD -->|/thinking| THINK["切换思考模式"]
-    CMD -->|其他文本| SEND["发送 generate"]
+    CMD -->|"/new"| NEW["创建新会话"]
+    CMD -->|"/use"| USE["切换会话"]
+    CMD -->|"/sessions"| LIST["列出会话"]
+    CMD -->|"/close"| CLOSE["关闭会话"]
+    CMD -->|"/cancel"| CANCEL["取消生成"]
+    CMD -->|"/sys"| SYS["检查能力后调用"]
+    CMD -->|"/health"| HEALTH["查询服务端健康"]
+    CMD -->|"/capabilities"| CAPS["显示能力矩阵"]
+    CMD -->|"/thinking"| THINK["切换思考模式"]
+    CMD -->|"其他文本"| SEND["发送 generate"]
     SEND --> STREAM["流式接收 chunk/think/finish"]
 
-    style START fill:#4A90E2,stroke:#1E3A8A,stroke-width:4px,color:#FFFFFF
-    style CAP fill:#F5A623,stroke:#B7791F,stroke-width:4px,color:#FFFFFF
-    style STREAM fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
+    style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style CONN fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style CAP fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style STREAM fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style MODE fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style CMD fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
 ```
 
 **命令列表**：
@@ -498,7 +580,7 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    subgraph CLIENT["🅿️ TLLMClient（llm_client.pas）"]
+    subgraph CLIENT["🅿️ TLLMClient"]
         CONN["Connect"]
         CAP["FetchCapabilities"]
         GEN["Generate"]
@@ -508,7 +590,7 @@ flowchart TB
         EVENTS["OnChunk / OnThink<br/>OnFinish / OnError / OnClosed"]
     end
 
-    subgraph GUI["🖥️ Tllm_tool_form（llm_tool_frm.pas）"]
+    subgraph GUI["🖥️ Tllm_tool_form"]
         BTN_CONN["连接按钮"]
         BTN_NEW["新建会话按钮"]
         BTN_GEN["发送 generate 按钮"]
@@ -529,51 +611,40 @@ flowchart TB
     TIMER -->|驱动软同步| EVENTS
     TIMER -->|轮询状态| LOG
 
-    style CLIENT fill:#D6EAF8,stroke:#1F618D,stroke-width:3px
-    style GUI fill:#FDEBD0,stroke:#B7791F,stroke-width:3px
+    style CLIENT fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style GUI fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style CONN fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style CAP fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style GEN fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style CS fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style SSM fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style HEALTH fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style EVENTS fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style BTN_CONN fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style BTN_NEW fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style BTN_GEN fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style BTN_SYS fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style MEMO fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style SSE fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style LOG fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
+    style TIMER fill:#FDEBD0,stroke:#B7791F,stroke-width:2px,color:#7E5109
 ```
 
 **关键设计**：
 
 - **`FActiveSessionId`**：会话过滤，只处理当前活动会话的消息，避免多会话输出串台。
-- **“新建会话”按钮**：自定义 system message 的**唯一有效入口**。因为 `llm_proxy.py` 不支持 `set_system_message`，必须通过 `CreateSession(system_message=...)` 传递。
+- **“新建会话”按钮**：自定义 system message 的**唯一有效入口**。因为 `llm_proxy.exe` 不支持 `set_system_message`，必须通过 `CreateSession(system_message=...)` 传递。
 - **`RegisterNotifySync`**：回调在主线程执行，可安全操作 VCL/LCL 控件。
 - **能力检查**：`LLM.HasCapabilityInfo` 和 `LLM.LLMSupported(API_NAME_SET_SYSTEM_MESSAGE)` 提前短路，避免无谓 RPC。
 - **Unicode**：全程 `TBytes` / UTF-8，绕过 AnsiString 转换，中文和 emoji 完整保留。
 
-**事件流**：
-
-```mermaid
-sequenceDiagram
-    participant S as 服务端
-    participant L as LingoFuse 主线程
-    participant C as TLLMClient
-    participant F as Tllm_tool_form
-
-    S->>L: Notify llm_stream
-    L->>C: OnLLMStream(Input_)
-    C->>C: 解析 JSON type
-    alt type=chunk
-        C->>F: Do_LLM_Chunk(SessionId, Text)
-        F->>F: 会话过滤 + AppendChunkToOutput
-    else type=think
-        C->>F: Do_LLM_Think(SessionId, Text)
-    else type=finish
-        C->>F: Do_LLM_Finish(SessionId, Reason)
-    else type=error
-        C->>F: Do_LLM_Error(SessionId, Message)
-    else type=closed
-        C->>F: Do_LLM_Closed(SessionId, Reason)
-    end
-```
-
-**注意事项**：Pascal 客户端的已知问题（`FormClose` 顺序、`var/out` 签名冲突、事件签名对齐、中文编码路径等）详见 [`LingoFuse_LLM_Pitfalls_For_AI.md`](LingoFuse_LLM_Pitfalls_For_AI.md) 中的 P1-5、P1-6、P1-7、P2-1、P3-3、P4-1 至 P4-6。
+**注意事项**：Pascal 客户端的已知问题（`FormClose` 顺序、`var/out` 签名冲突、事件签名对齐、中文编码路径等）详见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md`。
 
 ---
 
 ## 六、API 能力发现机制
 
-### 6.1 能力矩阵
+### 图 13：能力矩阵
 
 ```mermaid
 classDiagram
@@ -599,7 +670,7 @@ classDiagram
 
 **1 = 支持，0 = 不支持**。缺失条目按 0 处理。
 
-### 6.2 发现流程
+### 图 14：发现流程
 
 ```mermaid
 sequenceDiagram
@@ -609,7 +680,7 @@ sequenceDiagram
     C->>S: Connect
     C->>S: get_api_capabilities
     S-->>C: {code:0, server_kind, capabilities}
-    C->>C: 缓存到 FCapabilities
+    C->>C: 缓存到本地
     Note over C: 后续命令先查缓存
     C->>C: LLMSupported("set_system_message")
     alt 不支持
@@ -647,14 +718,14 @@ flowchart LR
     E --> EU["错误提示"]
     CL --> CLU["清理会话列表"]
 
-    style C fill:#3498DB,stroke:#1F618D,stroke-width:3px,color:#FFFFFF
-    style T fill:#95A5A6,stroke:#5D6D7E,stroke-width:3px,color:#FFFFFF
-    style F fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
-    style E fill:#E74C3C,stroke:#922B21,stroke-width:3px,color:#FFFFFF
-    style CL fill:#E67E22,stroke:#9C4A0C,stroke-width:3px,color:#FFFFFF
+    style C fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style T fill:#5D6D7E,stroke:#2C3E50,stroke-width:3px,color:#FFFFFF
+    style F fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style CL fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
 ```
 
-### 7.2 协议演进
+### 图 15：协议演进
 
 ```mermaid
 sequenceDiagram
@@ -680,140 +751,114 @@ sequenceDiagram
 ```mermaid
 stateDiagram-v2
     [*] --> Outside: 初始化
-    Outside --> Inside: 检测到 &lt;think&gt;
-    Inside --> Outside: 检测到 &lt;/think&gt;
+    Outside --> Inside: 检测到 think 开始标记
+    Inside --> Outside: 检测到 think 结束标记
     Outside --> Outside: 普通文本 → chunk
     Inside --> Inside: 思考文本 → think
-    note right of Outside
-        缓冲尾部 6 字符
-        处理跨 chunk 的 &lt;think&gt;
-    end note
-    note right of Inside
-        缓冲尾部 8 字符
-        处理跨 chunk 的 &lt;/think&gt;
-    end note
 ```
 
 **两条路径**：
 
-- `llm_service.py`：模板预置 `<think>` 或模型自发，`ThinkingParser` 状态机分流。
-- `llm_proxy.py`：后端 SSE 已分离 `reasoning_content` 和 `content`，代理无策略转发。
+- `llm_service.exe`：模板预置 thinking 标记或模型自发，`ThinkingParser` 状态机分流。
+- `llm_proxy.exe`：后端 SSE 已分离 `reasoning_content` 和 `content`，代理无策略转发。
 
 ---
 
 ## 八、典型使用场景
 
-### 8.1 本地推理 + Python REPL
+### 场景 1：本地推理 + Python REPL
 
 ```mermaid
 flowchart LR
     A["安装 llama-cpp-python"] --> B["下载 GGUF 模型"]
-    B --> C["python llm_service.py"]
-    C --> D["python llm_test.py"]
+    B --> C["启动 llm_service.exe"]
+    C --> D["启动 llm_test.exe"]
     D --> E["/new 创建会话"]
     E --> F["输入问题"]
     F --> G["实时流式输出"]
 
-    style A fill:#4A90E2,stroke:#1E3A8A,stroke-width:3px,color:#FFFFFF
-    style C fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
-    style G fill:#E74C3C,stroke:#922B21,stroke-width:4px,color:#FFFFFF
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style G fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-### 8.2 转发到 LM Studio + Pascal GUI
+### 场景 2：转发到 LM Studio + Pascal GUI
 
 ```mermaid
 flowchart LR
-    A["启动 LM Studio<br/>加载模型"] --> B["python llm_proxy.py<br/>--backend-url http://127.0.0.1:1234/v1"]
-    B --> C["编译并运行<br/>llm_tool.exe"]
+    A["启动 LM Studio<br/>加载模型"] --> B["启动 llm_proxy.exe<br/>--backend-url http://127.0.0.1:1234/v1"]
+    B --> C["运行 llm_tool.exe"]
     C --> D["点击连接"]
     D --> E["点击新建会话"]
     E --> F["输入 system prompt + 正文"]
     F --> G["发送 generate"]
 
-    style A fill:#4A90E2,stroke:#1E3A8A,stroke-width:3px,color:#FFFFFF
-    style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:4px,color:#FFFFFF
-    style C fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style C fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style G fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-### 8.3 跨机部署
+### 场景 3：跨机部署
 
 ```mermaid
 flowchart TB
     subgraph GPU["🖥️ GPU 工作站（服务端）"]
-        LP["python llm_proxy.py<br/>--endpoint 0.0.0.0:9898"]
+        LP["llm_proxy.exe<br/>--endpoint 0.0.0.0:9898"]
     end
 
     subgraph WEAK["💻 弱机笔记本（客户端）"]
-        PY["python llm_test.py<br/>--endpoint 192.168.1.100:9898"]
+        PY["llm_test.exe<br/>--endpoint 192.168.1.100:9898"]
         PAS["llm_tool.exe<br/>端点填 192.168.1.100:9898"]
     end
 
     LP -->|TCP 9898| PY
     LP -->|TCP 9898| PAS
 
-    style GPU fill:#E8DAEF,stroke:#6C3483,stroke-width:3px
-    style WEAK fill:#D6EAF8,stroke:#1F618D,stroke-width:3px
+    style GPU fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style WEAK fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style LP fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style PY fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style PAS fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
 ```
 
-### 8.4 同机多后端共存
+### 场景 4：同机多后端共存
 
 ```mermaid
 flowchart TB
     subgraph TERM["终端"]
-        T1["终端 1<br/>llm_service.py<br/>ipc:llm_service"]
-        T2["终端 2<br/>llm_proxy.py<br/>ipc:llm_proxy<br/>--app-name LLM_Proxy"]
+        T1["终端 1<br/>llm_service.exe<br/>ipc:llm_service"]
+        T2["终端 2<br/>llm_proxy.exe<br/>ipc:llm_proxy<br/>--app-name LLM_Proxy"]
     end
 
     subgraph CLIENT["客户端"]
-        C1["llm_test.py<br/>--endpoint ipc:llm_service"]
-        C2["llm_test.py<br/>--endpoint ipc:llm_proxy<br/>--server-app LLM_Proxy"]
+        C1["llm_test.exe<br/>--endpoint ipc:llm_service"]
+        C2["llm_test.exe<br/>--endpoint ipc:llm_proxy<br/>--server-app LLM_Proxy"]
     end
 
     T1 --> C1
     T2 --> C2
 
-    style T1 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
-    style T2 fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
-    style C1 fill:#3498DB,stroke:#1F618D,stroke-width:3px,color:#FFFFFF
-    style C2 fill:#3498DB,stroke:#1F618D,stroke-width:3px,color:#FFFFFF
+    style TERM fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style CLIENT fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style T1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style T2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style C1 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
+    style C2 fill:#D6EAF8,stroke:#1F618D,stroke-width:2px,color:#0D2F52
 ```
 
 ---
 
 ## 九、故障排查
 
-### 9.1 常见问题优先级矩阵
-
-```mermaid
-quadrantChart
-    title 踩坑优先级矩阵
-    x-axis 易踩程度低 --> 易踩程度高
-    y-axis 后果轻微 --> 后果严重
-    quadrant-1 立即防御
-    quadrant-2 高优先级
-    quadrant-3 低优先级
-    quadrant-4 排期修复
-    client_name错误: [0.90, 0.98]
-    llama.cpp线程: [0.70, 0.95]
-    回调中阻塞: [0.60, 0.90]
-    SSE缓冲: [0.85, 0.95]
-    proxy进程退出: [0.75, 0.90]
-    thinking混淆: [0.80, 0.75]
-    gzip压缩: [0.65, 0.90]
-    set_system_message: [0.70, 0.80]
-    模板路径搜索: [0.85, 0.55]
-    var/out冲突: [0.75, 0.65]
-    中文编码: [0.55, 0.80]
-    emoji控制台: [0.60, 0.55]
-    事件签名: [0.65, 0.60]
-    Connect泄漏: [0.50, 0.70]
-    会话过滤: [0.60, 0.75]
-    FormClose顺序: [0.60, 0.85]
-    后台读UI: [0.55, 0.75]
-    LF_Sync驱动: [0.45, 0.60]
-```
-
-### 9.2 症状速查表
+### 9.1 症状速查表
 
 | 症状 | 可能原因 | 参考 |
 |------|----------|------|
@@ -821,83 +866,83 @@ quadrantChart
 | 客户端延迟数秒才收到第一批 token | `requests` 的 SSE 缓冲 | P0-4 |
 | `llm_proxy` 启动后立即退出 | `main()` 缺少阻塞主循环 | P0-5 |
 | 思考阶段无输出，之后突然全部出现 | `reasoning_content` 被丢弃 | P0-6 |
-| `set_system_message` 返回 `unsupported` | 当前服务端是 `llm_proxy.py` | P6-3 |
+| `set_system_message` 返回 `unsupported` | 当前服务端是 `llm_proxy.exe` | P6-3 |
 | 多会话输出串台 | 客户端未按 `session_id` 过滤 | P6-4 |
 | 中文乱码 | 未使用 `TBytes` 全程 UTF-8 | P2-1 |
 | emoji 显示为 `?` | Windows 控制台代码页问题 | P2-3 |
-| 关闭窗口时崩溃 | `FormClose` 直接 `LF_Shutdown` | P4-2 |
-| 流式输出延迟极大 | `RegisterNotifySync` 未驱动 `LF_Sync` | P4-3 |
+| 关闭窗口时崩溃 | `FormClose` 直接 Shutdown | P4-2 |
+| 流式输出延迟极大 | `RegisterNotifySync` 未驱动同步 | P4-3 |
 | 连接失败后按钮永久禁用 | 失败路径未恢复 UI | P4-4 |
 | 新的 system prompt 不生效 | 未走 `CreateSession` 路径 | P4-5 |
 
-完整排查指南和所有坑的索引，请直接查阅 [`LingoFuse_LLM_Pitfalls_For_AI.md`](LingoFuse_LLM_Pitfalls_For_AI.md)。
+完整排查指南和所有坑的索引，请直接查阅同目录 `LingoFuse_LLM_Pitfalls_For_AI.md`。
 
-### 9.3 启动失败排查流程
+### 图 16：启动失败排查优先级
 
 ```mermaid
 flowchart TB
-    subgraph Q1["🔴 立即防御 —— 易踩程度高 + 后果严重"]
+    subgraph Q1["🔴 立即防御 —— 易踩高 + 后果严重"]
         direction LR
-        A1["client_name 错误<br/>P0-1"]
-        A2["llama.cpp 线程不安全<br/>P0-2"]
-        A3["回调中阻塞<br/>P0-3"]
-        A4["SSE 缓冲<br/>P0-4"]
-        A5["proxy 进程秒退<br/>P0-5"]
-        A6["thinking 混淆<br/>P0-6"]
-        A7["gzip 压缩<br/>P6-1"]
-        A8["set_system_message<br/>P6-3"]
+        A1["client_name 错误"]
+        A2["llama.cpp 线程不安全"]
+        A3["回调中阻塞"]
+        A4["SSE 缓冲"]
+        A5["proxy 进程秒退"]
+        A6["thinking 混淆"]
+        A7["gzip 压缩"]
+        A8["set_system_message 假成功"]
     end
 
-    subgraph Q2["🟠 高优先级 —— 易踩程度高 + 后果中等"]
+    subgraph Q2["🟠 高优先级 —— 易踩高 + 后果中等"]
         direction LR
-        B1["模板路径搜索<br/>P1-1"]
-        B2["var/out 冲突<br/>P1-5"]
-        B3["事件签名<br/>P1-6"]
-        B4["会话过滤<br/>P6-4"]
-        B5["FormClose 顺序<br/>P4-2"]
-        B6["后台读 UI<br/>P4-1"]
-        B7["中文编码<br/>P2-1"]
+        B1["模板路径搜索"]
+        B2["var/out 冲突"]
+        B3["事件签名"]
+        B4["会话过滤"]
+        B5["FormClose 顺序"]
+        B6["后台读 UI"]
+        B7["中文编码"]
     end
 
-    subgraph Q3["🟡 一般关注 —— 易踩程度低 + 后果中等"]
+    subgraph Q3["🟡 一般关注 —— 易踩低 + 后果中等"]
         direction LR
-        C1["emoji 控制台<br/>P2-3"]
-        C2["Connect 泄漏<br/>P1-7"]
-        C3["LF_Sync 驱动<br/>P4-3"]
-        C4["TCP_NODELAY<br/>P6-2"]
+        C1["emoji 控制台"]
+        C2["Connect 泄漏"]
+        C3["LF_Sync 驱动"]
+        C4["TCP_NODELAY"]
     end
 
-    subgraph Q4["🟢 排期修复 —— 易踩程度低 + 后果轻微"]
+    subgraph Q4["🟢 排期修复 —— 易踩低 + 后果轻微"]
         direction LR
-        D1["递归栈溢出<br/>P5-1"]
-        D2["buffer 判空<br/>P5-2"]
+        D1["递归栈溢出"]
+        D2["buffer 判空"]
     end
 
-    style Q1 fill:#FADBD8,stroke:#922B21,stroke-width:4px
-    style Q2 fill:#FDEBD0,stroke:#B7791F,stroke-width:4px
-    style Q3 fill:#FEF9E7,stroke:#B7950B,stroke-width:3px
-    style Q4 fill:#EAECEE,stroke:#5D6D7E,stroke-width:3px
-    style A1 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A2 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A3 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A4 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A5 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A6 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A7 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style A8 fill:#E74C3C,stroke:#922B21,stroke-width:2px,color:#FFFFFF
-    style B1 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B2 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B3 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B4 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B5 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B6 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style B7 fill:#F5A623,stroke:#B7791F,stroke-width:2px,color:#FFFFFF
-    style C1 fill:#F7DC6F,stroke:#B7950B,stroke-width:2px,color:#7E5109
-    style C2 fill:#F7DC6F,stroke:#B7950B,stroke-width:2px,color:#7E5109
-    style C3 fill:#F7DC6F,stroke:#B7950B,stroke-width:2px,color:#7E5109
-    style C4 fill:#F7DC6F,stroke:#B7950B,stroke-width:2px,color:#7E5109
-    style D1 fill:#D5D8DC,stroke:#5D6D7E,stroke-width:2px,color:#2C3E50
-    style D2 fill:#D5D8DC,stroke:#5D6D7E,stroke-width:2px,color:#2C3E50
+    style Q1 fill:#FADBD8,stroke:#922B21,stroke-width:3px,color:#5A1A14
+    style Q2 fill:#FDEBD0,stroke:#B7791F,stroke-width:3px,color:#7E5109
+    style Q3 fill:#FEF9E7,stroke:#B7950B,stroke-width:3px,color:#7E5109
+    style Q4 fill:#EAECEE,stroke:#5D6D7E,stroke-width:3px,color:#2C3E50
+    style A1 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A2 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A3 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A4 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A5 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A6 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A7 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style A8 fill:#922B21,stroke:#5A1A14,stroke-width:2px,color:#FFFFFF
+    style B1 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B2 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B3 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B4 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B5 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B6 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style B7 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C1 fill:#B7950B,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C2 fill:#B7950B,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C3 fill:#B7950B,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C4 fill:#B7950B,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style D1 fill:#5D6D7E,stroke:#2C3E50,stroke-width:2px,color:#FFFFFF
+    style D2 fill:#5D6D7E,stroke:#2C3E50,stroke-width:2px,color:#FFFFFF
 ```
 
 ---
@@ -927,21 +972,19 @@ mindmap
 
 ---
 
-## 十一、文档索引
+## 十一、文档索引（同目录）
 
 | 文档 | 说明 |
 |------|------|
-| [`LingoFuse_LLM_Service_CLI_guide.md`](LingoFuse_LLM_Service_CLI_guide.md) | `llm_service.py` 命令行完整手册 |
-| [`LingoFuse_LLM_Proxy_CLI_Guide.md`](LingoFuse_LLM_Proxy_CLI_Guide.md) | `llm_proxy.py` 命令行完整手册 |
-| [`LingoFuse_LLM_Proxy_Compatibility_Guide.md`](LingoFuse_LLM_Proxy_Compatibility_Guide.md) | 支持的 129+ OpenAI 兼容后端清单 |
-| [`LingoFuse_Python_Streaming_LLM_Guide.md`](LingoFuse_Python_Streaming_LLM_Guide.md) | Python 流式 LLM 服务开发要点 |
-| [`LingoFuse_LLM_Pitfalls_For_AI.md`](LingoFuse_LLM_Pitfalls_For_AI.md) | 踩坑大全，症状-根因-正确做法 |
-| [`LingoFuse_LLM_Service_Work_Summary.md`](LingoFuse_LLM_Service_Work_Summary.md) | 工作总结，版本演进与架构决策 |
-| [`llama_cpp_python_guide.md`](llama_cpp_python_guide.md) | `llama-cpp-python` 安装与使用 |
-| `llm_client.pas` | Pascal 客户端单元，含完整注释 |
-| `llm_tool_frm.pas` | Pascal GUI 窗体，含完整注释 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行完整手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行完整手册 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | 版本演进与架构决策（历史参考） |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
 ---
 
-**文档结束**  
-*本指南为 LingoFuse LLM 生态提供全局视野，具体参数和实现细节请查阅对应组件的专项文档。所有图表使用 Mermaid 绘制，可在支持 Mermaid 的渲染器中查看。*
+**文档版本**：v3.0（仅保留同目录链接，高对比配色，多图拆分）  
+**维护者**：LingoFuse-pasAgent 团队  
+**反馈**：问题提 Issue，急事加 Q（600585）
