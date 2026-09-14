@@ -5,20 +5,24 @@
 > LingoFuse-pasAgent 是工业级 Pascal 智能体技术体系，让 AI 客户端（Claude / LM Studio / 豆包 / DeepSeek 等）通过 MCP 协议直接调用你的 Pascal 函数。提供预编译包，新手无需配置开发环境即可体验。核心链路完全确定性——不依赖 LLM 随机性，结果可复现，零调试成本。
 
 ## Key facts
-- Repository: https://github.com/PassByYou888/LingoFuse-pasAgent
-- License: MIT
-- Status: Active development (project started 2026)
-- Core mechanism: MCP (Model Context Protocol) + Pascal + LingoFuse RPC
-- Pre-built package: https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build
-- Quick start time: ~10 minutes with pre-built package
-- Runtime dependency: Visual Studio 2022 VC++ Redistributable (x86/x64)
-- Supported AI clients: Doubao, LM Studio, Claude, Continue.dev, Jan, DeepSeek, any MCP-compatible client
-- Fully offline capable: all components run locally
-- Works with any Pascal function: database, file, hardware, GUI
-- Related project: LingoFuse — https://github.com/PassByYou888/LingoFuse
-- Related project: zIPC — https://github.com/PassByYou888/zIPC
+
+- **Repository**: https://github.com/PassByYou888/LingoFuse-pasAgent
+- **License**: MIT
+- **Status**: Active development (project started 2026)
+- **Latest doc revision**: 2026-09-14
+- **Core mechanism**: MCP (Model Context Protocol) + Pascal + LingoFuse RPC
+- **Pre-built package**: https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build
+- **Quick start time**: ~10 minutes with pre-built package
+- **Runtime dependency**: Visual Studio 2022 VC++ Redistributable (x86/x64)
+- **Supported AI clients**: Doubao, LM Studio, Claude, Continue.dev, Jan, DeepSeek, any MCP-compatible client
+- **Fully offline capable**: all components run locally
+- **Works with any Pascal function**: database, file, hardware, GUI
+- **Recommended model**: `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf` (~19.7 GB, MoE 30B-A3B, ~20 tokens/s on CPU)
+- **Related project**: LingoFuse — https://github.com/PassByYou888/LingoFuse
+- **Related project**: zIPC — https://github.com/PassByYou888/zIPC
 
 ## Core capabilities
+
 - Exposes Pascal functions as AI-callable tools via MCP protocol
 - No MCP protocol knowledge required — write Pascal, AI calls it
 - No JSON Schema writing required
@@ -30,77 +34,145 @@
 - Supports all MCP clients: Doubao, LM Studio, Claude, Continue.dev, Jan, DeepSeek
 - Fully offline: local LLM streaming service included
 - UI-compatible: code generator reserves main-thread sync interface
+- **Two tool execution paths**:
+  - **Path A (client-side)**: For MCP-capable clients. Tools exposed via `mcp_api_tool.exe`.
+  - **Path B (server-side)**: For clients that only send `generate`. Tools executed by `llm_proxy_tool.exe` (LTB) — **zero client changes**.
+- **Three sibling LLM backends** (only one may run at a time on the default endpoint):
+  - `llm_service.exe` — local inference (llama.cpp / GGUF)
+  - `llm_proxy.exe` — stateless text proxy to 129+ OpenAI-compatible backends
+  - `llm_proxy_tool.exe` (LTB) — proxy + server-side MCP tool execution
 
 ## How it works
 
+### Path A — client-side tool execution (classic MCP)
+
 ```mermaid
 flowchart LR
-    U["你写 Pascal 函数"] --> P["pascal_agent_service（信标）"]
-    P --> M["mcp_server（网关）"]
-    M -->|MCP 协议| AI["AI 客户端 LM Studio / Claude / 豆包"]
-    AI -->|调用工具| M
-    M -->|执行| P
-    P -.->|返回结果| M
-    M -.->|返回结果| AI
+    U["👤 用户"] --> C["🤖 AI 客户端（支持 MCP）"]
+    C -->|MCP| M["🌉 mcp_api_tool.exe"]
+    M -->|LF_Call| B["📡 信标<br/>pascal_agent_service.exe"]
+    B -->|路由| T["🎯 Pascal 工具<br/>pascal_agent_api.exe"]
+    T -.->|结果| B -.-> M -.-> C -.-> U
 ```
 
-Your Pascal functions → translated by `mcp_server` → AI client sees standard tools → calls actually execute your Pascal code.
+### Path B — server-side tool execution (LTB)
+
+```mermaid
+flowchart LR
+    U["👤 用户"] --> C["🤖 AI 客户端（不感知工具）"]
+    C -->|LF generate| L["🔴 llm_proxy_tool.exe<br/>LTB"]
+    L -->|HTTP SSE + tools| R["🔌 后端<br/>LM Studio / DeepSeek"]
+    R -.->|tool_calls| L
+    L -->|LF_Call| B["📡 信标"]
+    B -->|路由| T["🎯 Pascal 工具"]
+    T -.->|结果| B -.-> L
+    L -->|role=tool 回填| R
+    R -.->|最终文本| L
+    L -.->|chunk/think/finish| C --> U
+```
+
+Your Pascal functions → translated by `mcp_api_tool` (Path A) or executed by `llm_proxy_tool` (Path B) → AI client sees standard tools → calls actually execute your Pascal code.
 
 ## 5-layer transparent code generation pipeline
 
 ```mermaid
 flowchart TB
-    L0["Layer 0 — 原始 Pascal 源码"] --> L1["Layer 1 — Pascal 声明体"]
+    L0["Layer 0 — 原始 Pascal / C 源码"] --> L1["Layer 1 — 统一声明体"]
     L1 <-.->|双向| L2["Layer 2 — LV0 声明 JSON"]
     L2 --> L3["Layer 3 — LV1 模型 JSON"]
-    L3 --> L4["Layer 4 — 工具提供者单元"]
+    L3 --> L4["Layer 4 — 工具提供者单元 .pas"]
 ```
 
 | Layer | Content | Purpose |
 |---|---|---|
-| Layer 0 | Raw Pascal source | Your original code |
-| Layer 1 | Pascal declaration body | Extracted function signatures |
+| Layer 0 | Raw Pascal / C source | Your original code |
+| Layer 1 | Unified declaration body | Extracted function signatures |
 | Layer 2 | LV0 declaration JSON | Structured declarations |
 | Layer 3 | LV1 model JSON | Normalized model |
-| Layer 4 | Tool provider unit | Generated MCP tool definitions |
+| Layer 4 | Tool provider unit (.pas) | Generated MCP tool definitions |
 
-Each layer can be independently viewed, edited, exported, fed to LLM for assistance, or rolled back on error.
+Each layer can be independently viewed, edited, exported, fed to LLM for assistance, or rolled back on error. The generator itself (`code_decl_to_mcp.exe`) is a **GUI application**, not a command-line tool. Its source lives in the **LingoFuse core repository**, not in this repo.
 
 ## Component architecture
 
-| Component | Purpose | Target user |
-|---|---|---|
-| Pascal Agent Service | Register your Pascal functions as tools | Pascal developers |
-| MCP Protocol Gateway | Translate tools into MCP protocol | Service deployers |
-| Code Generator | Generate tool definitions from Pascal declarations | Developers during development |
-| LLM Streaming Service | Run local LLM, fully offline | Air-gapped users |
+| Component | Binary / File | Purpose | Target user |
+|---|---|---|---|
+| Pascal Beacon | `pascal_agent_service.exe` | Register & discover tools across the mesh | Service deployers |
+| Pascal Tool Provider | `pascal_agent_api.exe` | Expose your Pascal functions as tools | Pascal developers |
+| MCP Gateway (Path A) | `mcp_api_tool.exe` | Translate tools into MCP protocol | MCP-capable clients |
+| MCP Debug Proxy | `mcp_api_proxy.exe` | stdio passthrough with JSON-RPC line filtering | Debuggers |
+| Code Generator | `code_decl_to_mcp.exe` | Generate tool provider unit from Pascal / C declarations | Developers during development |
+| Local LLM Service | `llm_service.exe` | Run local GGUF models (fully offline) | Air-gapped users |
+| LLM Text Proxy | `llm_proxy.exe` | Forward to 129+ OpenAI-compatible backends | Cloud / LAN users |
+| LLM Tool Bridge (LTB) | `llm_proxy_tool.exe` | Proxy + **server-side MCP tool execution** | Clients without MCP |
+| LLM Test Client | `llm_test.exe` | Interactive multi-session REPL | Debugging |
+| HTTP Bridge | `bridge.exe` | HTTP-to-LingoFuse passthrough | Web ecosystem |
+| Health Check | `HealthCheck.exe` | Verify runtime & DLLs | First-time deployers |
 
 ## Project structure
 
 ```
-src/
-├── Pascal 后端
-│   ├── pascal_agent_service.lpr
-│   ├── pascal_agent_api.lpr
-│   ├── lingofuse_helper.pas
-│   └── CreateHealthCheck/
-├── Python 网关
-│   ├── mcp_server.py
-│   ├── mcp_proxy.py
-│   ├── language_middleware.py
-│   └── generate_agent_json.py
-├── 代码生成器
-│   └── tools/pascal_decl_to_mcp.lpr
-├── LLM 服务
-│   └── llm-service/
-└── Python 核心绑定
-    └── lingofuse/
+LingoFuse-pasAgent/
+├── readme.md
+├── Build_Guide.md
+├── Dependency_Installation_Guide.md
+├── mcp_api_tool_DOUBAO_GUIDE.md
+├── NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md
+├── Qwen2.5-7B-Instruct-Q4_K_M.md                    (历史参考)
+├── code_generate_mcp.md
+├── pascal_code_mcp_rule.md
+├── C_code_mcp_rule.md
+├── LingoFuse_mcp_api_tool_Implementation_Memo.md
+├── LingoFuse_Python_Binding_Migration_Record.md
+├── Local LLM Agent Handbook CPU First, GPU Optional.md
+├── llms.txt
+├── LICENSE
+└── src/
+    ├── Pascal 后端
+    │   ├── pascal_agent_service.lpr / .lpi
+    │   ├── pascal_agent_api.lpr / .lpi
+    │   ├── lingofuse_helper.pas
+    │   ├── lingofuse_import.pas
+    │   ├── pascal_agent_api_ref_json.md
+    │   └── CreateHealthCheck/
+    ├── Python 网关
+    │   ├── mcp_api_tool.py
+    │   ├── mcp_api_proxy.py
+    │   ├── language_middleware.py
+    │   └── generate_agent_json.py
+    ├── LLM 服务
+    │   ├── llm_service.py       (本地推理)
+    │   ├── llm_proxy.py         (纯文本代理)
+    │   ├── llm_proxy_tool.py    (LTB，服务端工具执行)
+    │   └── llm_test.py          (REPL 客户端)
+    ├── 构建脚本
+    │   ├── build_mcp_api_tool.ps1
+    │   ├── build_llm_service.ps1
+    │   ├── build_bridge.ps1
+    │   ├── build_pascal_agent.bat
+    │   └── init_env.ps1
+    ├── Python 核心绑定
+    │   └── lingofuse/
+    │       ├── core.py / client.py / server.py / bridge.py
+    │       ├── _lf_native.py / serializers.py / errors.py
+    │       └── Bridge_User_Guide.md
+    └── LLM 生态文档 (7 份)
+        ├── LingoFuse_LLM_Ecosystem_User_Guide.md
+        ├── LingoFuse_LLM_Service_CLI_guide.md
+        ├── LingoFuse_LLM_Proxy_CLI_Guide.md
+        ├── LingoFuse_LLM_Proxy_Compatibility_Guide.md
+        ├── LingoFuse_LLM_Pitfalls_For_AI.md
+        ├── LingoFuse_LLM_Service_Work_Summary.md
+        └── llama_cpp_python_guide.md
 ```
 
-**Three files you need to care about**:
-- `pascal_agent_api.lpr` — arithmetic tool example, your project prototype
-- `pascal_agent_service.lpr` — the server source you need to modify
-- `lingofuse_helper.pas` — helper functions for writing tools
+**Files you need to care about first**:
+- `src/pascal_agent_api.lpr` — arithmetic tool example, your project prototype
+- `src/pascal_agent_service.lpr` — the beacon source
+- `src/lingofuse_helper.pas` — helper functions for writing tools
+- `src/lingofuse/` — LingoFuse Python binding package (packed into EXEs)
+
+> **Note**: `code_decl_to_mcp` source is **not** in this repository. Only its user manual (`code_generate_mcp.md`) and declaration specs are provided here.
 
 ## Quick start (3 steps)
 
@@ -113,29 +185,42 @@ begin
 end;
 ```
 
-### Step 2: Run the code generator
+### Step 2: Generate the tool provider unit (GUI)
 
-```bash
-pascal_decl_to_mcp.exe --input your_functions.pas --output tools/
-```
+Launch `code_decl_to_mcp.exe`, paste the declaration, walk through the 5 tabs (source → LV0 JSON → LV1 JSON → generated source), then copy the generated `.pas` file into your Lazarus project.
 
 ### Step 3: Compile and start
 
 ```bash
-# Compile the generated tool unit
-fpc -Mdelphi tools/your_tools.pas
+# Compile the generated tool unit (use lazbuild, NOT raw fpc)
+lazbuild -B ./your_tools.lpi
 
-# Start the MCP gateway
-python mcp_server.py
+# Start the beacon (must run first)
+pascal_agent_service.exe
+
+# Start the tool provider (registers itself to the beacon)
+your_tools.exe
+
+# Start the MCP gateway (Path A)
+mcp_api_tool.exe
 ```
 
-AI can now call your Pascal function. For the complete step-by-step guide, see [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md).
+AI can now call your Pascal function. For the complete step-by-step guide, see [mcp_api_tool_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/mcp_api_tool_DOUBAO_GUIDE.md).
+
+### Path B — client does not support MCP
+
+```bash
+# Start LTB instead of mcp_api_tool
+llm_proxy_tool.exe --backend-url http://127.0.0.1:1234/v1 --mcp-reg-agent-app llm_proxy_agent
+```
+
+Your client only sends `generate`. LTB handles the entire tool-call loop internally.
 
 ### Pre-built package (no environment setup)
 
 1. Download [Pre-built Package](https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build)
-2. Extract
-3. Follow [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md)
+2. Extract to e.g. `C:\Temp\temp2`
+3. Follow [mcp_api_tool_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/mcp_api_tool_DOUBAO_GUIDE.md)
 4. Call your first Pascal tool from AI in 10 minutes
 
 ### Clone
@@ -148,17 +233,36 @@ git submodule update --init --recursive
 
 ## Documentation map
 
+### Root directory
+
 | Document | Description | Audience |
 |---|---|---|
-| [MCP_SERVER_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/MCP_SERVER_DOUBAO_GUIDE.md) | Beginner tutorial (step-by-step) | New users |
-| [pascal_code_rule.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/pascal_code_rule.md) | Pascal declaration specification | Developers |
-| [Build_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Build_Guide.md) | Compilation guide | Developers |
-| [Dependency_Installation_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Dependency_Installation_Guide.md) | Dependency installation | Developers |
-| [Qwen2.5-7B-Instruct-Q4_K_M.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Qwen2.5-7B-Instruct-Q4_K_M.md) | Model download | Deployers |
-| [LingoFuse_LLM_Service_guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_LLM_Service_guide.md) | LLM service CLI | Deployers |
+| [readme.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/readme.md) | Project overview & closed-loop architecture | Everyone |
+| [mcp_api_tool_DOUBAO_GUIDE.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/mcp_api_tool_DOUBAO_GUIDE.md) | Beginner tutorial (step-by-step, Doubao-assisted) | New users |
+| [Build_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Build_Guide.md) | Compilation guide (Pascal + Python EXEs) | Developers |
+| [Dependency_Installation_Guide.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Dependency_Installation_Guide.md) | Dependency installation & dynamic library deployment | Developers |
+| [NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md) | **Recommended model** download & deployment | Deployers |
+| [Qwen2.5-7B-Instruct-Q4_K_M.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Qwen2.5-7B-Instruct-Q4_K_M.md) | Legacy entry model (historical reference) | Deployers |
+| [code_generate_mcp.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/code_generate_mcp.md) | Code generator user manual | Developers |
+| [pascal_code_mcp_rule.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/pascal_code_mcp_rule.md) | Pascal declaration specification (parsing contract) | Pascal developers |
+| [C_code_mcp_rule.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/C_code_mcp_rule.md) | C declaration specification (parsing contract) | C developers |
+| [LingoFuse_mcp_api_tool_Implementation_Memo.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_mcp_api_tool_Implementation_Memo.md) | MCP gateway implementation memo (stdio, caching, offline detection) | Advanced |
+| [LingoFuse_Python_Binding_Migration_Record.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_Python_Binding_Migration_Record.md) | Migration & work summary (historical reference) | Advanced |
 | [Local LLM Agent Handbook CPU First, GPU Optional.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/Local%20LLM%20Agent%20Handbook%20CPU%20First%2C%20GPU%20Optional.md) | Agent principles handbook | Advanced |
-| [LingoFuse_MCP_Server_Implementation_Memo.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_MCP_Server_Implementation_Memo.md) | MCP server implementation memo | Advanced |
-| [LingoFuse_Python_Binding_Migration_Record.md](https://github.com/PassByYou888/LingoFuse-pasAgent/blob/main/LingoFuse_Python_Binding_Migration_Record.md) | Migration & work summary | Advanced |
+
+### `src/` directory
+
+| Document | Description | Audience |
+|---|---|---|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | Closed-loop architecture & ecosystem overview (3 backends + 2 paths) | Everyone |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` CLI reference | Deployers |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` CLI reference | Deployers |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 129+ OpenAI-compatible backend list (LTB also applies) | Deployers |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | Pitfalls compendium (symptom → root cause → fix) | Debuggers |
+| `LingoFuse_LLM_Service_Work_Summary.md` | LLM toolchain version history & architecture decisions | Advanced |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` install & usage | Developers |
+| `lingofuse/Bridge_User_Guide.md` | HTTP bridge user guide | Web integrators |
+| `pascal_agent_api_ref_json.md` | `agent_main` / `register_agent` JSON schema reference | Tool developers |
 
 ## FAQ
 
@@ -167,15 +271,20 @@ git submodule update --init --recursive
 | Do I need to know MCP protocol? | **No** — just write Pascal |
 | Does it only support Doubao? | **No** — supports all MCP clients: Doubao / LM Studio / Claude / Continue.dev / Jan / DeepSeek |
 | Can it only do arithmetic? | **Any Pascal function** — database, file, hardware, GUI |
-| Does it need internet? | **No** — all components run locally |
+| Does it need internet? | **No** — all components run locally (unless using `llm_proxy` / `llm_proxy_tool` with a cloud backend) |
 | Can my function operate UI? | **Yes** — generated code reserves main-thread sync interface |
 | Missing DLL and don't want to compile? | **Download the pre-built package** — extract and run |
+| What if my client doesn't support MCP? | **Use `llm_proxy_tool.exe` (Path B)** — the server handles the tool loop |
+| Can the three LLM backends run simultaneously? | **No (by default)** — they share `ipc:llm_service`. Override `--endpoint` + `--app-name` to coexist |
+| Which model is recommended? | **NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf** (~20 tokens/s on CPU, 1M context) |
+| Where is the code generator source? | **In the LingoFuse core repository** — this repo only ships the user manual |
 
 ## Relation to LingoFuse
 
 pasAgent is a branch project of LingoFuse. LingoFuse provides the cross-language RPC mesh and service discovery infrastructure. pasAgent builds on top of it to expose Pascal functions as MCP tools for AI agents. Both are fully open, non-commercial, community-driven projects under MIT license.
 
 ## Links
+
 - GitHub: https://github.com/PassByYou888/LingoFuse-pasAgent
 - Pre-built Package: https://github.com/PassByYou888/LingoFuse-pasAgent/releases/tag/pre_build
 - LingoFuse (parent project): https://github.com/PassByYou888/LingoFuse
@@ -183,4 +292,5 @@ pasAgent is a branch project of LingoFuse. LingoFuse provides the cross-language
 - README: https://github.com/PassByYou888/LingoFuse-pasAgent#readme
 
 ## Keywords
-LingoFuse-pasAgent, pasAgent, Pascal AI agent, MCP server, Model Context Protocol, Pascal MCP, AI call Pascal, Pascal toolchain, deterministic code generation, 5-layer pipeline, Pascal function as tool, local LLM, offline AI, Doubao, LM Studio, Claude, DeepSeek, MIT license, LingoFuse, zIPC, AI 调用 Pascal, Pascal 智能体, MCP 协议网关, 代码生成器, 确定性链路, 本地大模型, 离线 AI, 工业级 Pascal
+
+LingoFuse-pasAgent, pasAgent, Pascal AI agent, MCP server, Model Context Protocol, Pascal MCP, AI call Pascal, Pascal toolchain, deterministic code generation, 5-layer pipeline, Pascal function as tool, local LLM, offline AI, Doubao, LM Studio, Claude, DeepSeek, Continue.dev, Jan, MIT license, LingoFuse, zIPC, NVIDIA Nemotron, Nemotron 3.5 Lightning, 30B-A3B, MoE, GGUF, IQ4_NL, llama.cpp, llama-cpp-python, OpenAI-compatible backend, LLM proxy, LLM tool bridge, LTB, server-side tool execution, llm_service, llm_proxy, llm_proxy_tool, mcp_api_tool, mcp_api_proxy, language_middleware, tool provider, beacon, pascal_agent_service, pascal_agent_api, HTTP bridge, bridge.py, 129+ backends, Qwen2.5-7B, DeepSeek-V3, AI 调用 Pascal, Pascal 智能体, MCP 协议网关, 代码生成器, 确定性链路, 本地大模型, 离线 AI, 工业级 Pascal, 路径 A, 路径 B, 服务端工具执行, 零客户端改动, 预编译包, 保姆级教程, Free Pascal, Lazarus, lazbuild, Delphi

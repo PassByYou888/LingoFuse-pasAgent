@@ -9,7 +9,7 @@ program pascal_agent_service;
     three main APIs:
 
       - agent_main   : Returns a JSON list of all available tools with their
-                       schemas (used by mcp_server to dynamically register MCP tools).
+                       schemas (used by mcp_api_tool to dynamically register MCP tools).
       - agent_log    : Accepts log messages from the gateway and prints them
                        to the console (with optional forwarding to a log file).
       - register_agent: Allows dynamic registration of new tools at runtime

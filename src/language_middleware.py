@@ -5,7 +5,7 @@ language_middleware.py - v7.3 (LingoFuse Native Multi-Language Middleware)
 DESCRIPTION
     This module provides a language-agnostic middleware for LingoFuse,
     designed to act as a bridge between MCP (Model Context Protocol)
-    servers (like mcp_server.py) and a backend tool provider implemented
+    servers (like mcp_api_tool.py) and a backend tool provider implemented
     in any language (Pascal, Python, etc.). It handles:
 
         - Lazy connection to a LingoFuse endpoint (IPC or TCP).

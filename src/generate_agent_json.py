@@ -8,11 +8,11 @@ for various MCP clients (LM Studio, Claude Desktop, Continue.dev, Jan,
 Generic, DeepSeek). It supports:
 
     * stdio (direct)
-    * stdio (via mcp_proxy, for debugging)
+    * stdio (via mcp_api_proxy, for debugging)
     * Streamable HTTP (recommended)
     * legacy SSE (deprecated)
 
-The module is designed to be imported and called by mcp_server.py, but can
+The module is designed to be imported and called by mcp_api_tool.py, but can
 also be used standalone from the command line.
 
 Project layout assumption
@@ -20,8 +20,8 @@ Project layout assumption
 This project ships the proxy and the server side by side, mirroring their
 type:
 
-    * Source mode:   mcp_server.py + mcp_proxy.py
-    * Packaged mode: mcp_server.exe + mcp_proxy.exe
+    * Source mode:   mcp_api_tool.py + mcp_api_proxy.py
+    * Packaged mode: mcp_api_tool.exe + mcp_api_proxy.exe
 
 The generator therefore derives the proxy launch command from the *server
 type* (is_exe), not from the file extension of the proxy alone. This makes
@@ -29,11 +29,11 @@ the two modes consistent:
 
     * If server is a Python script:
           command = python_exe
-          args    = [mcp_proxy.py, python_exe, mcp_server.py, ...]
+          args    = [mcp_api_proxy.py, python_exe, mcp_api_tool.py, ...]
 
     * If server is a native executable:
-          command = mcp_proxy.exe
-          args    = [mcp_server.exe, ...]
+          command = mcp_api_proxy.exe
+          args    = [mcp_api_tool.exe, ...]
 
 Generated stdio configurations always include `--log-file` so that the
 server writes a log next to the generated configs.
@@ -119,7 +119,7 @@ def generate_configs(
     Generate MCP client configuration files and Markdown docs.
 
     Args:
-        server_script_path: Path to mcp_server.py (or the executable).
+        server_script_path: Path to mcp_api_tool.py (or the executable).
         endpoint: LingoFuse endpoint.
         timeout_ms: Call timeout in milliseconds.
         reg_agent_app: Registration agent app name.
@@ -133,7 +133,7 @@ def generate_configs(
         python_exe: Python executable (defaults to sys.executable).
         is_exe: Force treat server_script_path as an executable. If None,
                 auto-detect based on the file extension.
-        proxy_path: Path to mcp_proxy (script or exe). If provided and valid,
+        proxy_path: Path to mcp_api_proxy (script or exe). If provided and valid,
                     `_stdio_proxy.json` files will be generated.
     """
     if python_exe is None:
@@ -161,7 +161,7 @@ def generate_configs(
     print(f"[Generator] Output directory: {output_path.absolute()}")
 
     # Absolute path for the server log file (placed next to the configs)
-    log_file_path = str((output_path / "mcp_server.log").resolve())
+    log_file_path = str((output_path / "mcp_api_tool.log").resolve())
 
     # ----- Base args common to all transports -----
     base_args = [
@@ -202,7 +202,7 @@ def generate_configs(
     # The proxy is a thin stdio wrapper that launches the real server as a
     # child process and logs every byte exchanged. Its own launch command
     # mirrors the server type, because the project ships them as a matched
-    # pair (mcp_server.py + mcp_proxy.py, or mcp_server.exe + mcp_proxy.exe).
+    # pair (mcp_api_tool.py + mcp_api_proxy.py, or mcp_api_tool.exe + mcp_api_proxy.exe).
     #
     proxy_stdio_command = None
     proxy_stdio_args_full = None
@@ -319,12 +319,12 @@ def generate_configs(
         # Human-readable server invocation
         if is_exe:
             server_invocation = f"`{server_script_path}` (executable)"
-            expected_proxy_name = "mcp_proxy.exe"
+            expected_proxy_name = "mcp_api_proxy.exe"
         else:
             server_invocation = (
                 f"`{python_exe} {server_script_path}` (Python script)"
             )
-            expected_proxy_name = "mcp_proxy.py"
+            expected_proxy_name = "mcp_api_proxy.py"
 
         # Manual invocation examples
         stdio_cmd_example = " ".join([stdio_command] + stdio_args_full)
@@ -337,11 +337,11 @@ def generate_configs(
                 [proxy_stdio_command] + proxy_stdio_args_full
             )
             proxy_section = f"""
-- **`{agent_id}_stdio_proxy.json`** — stdio transport **via mcp_proxy**.
+- **`{agent_id}_stdio_proxy.json`** — stdio transport **via mcp_api_proxy**.
 
   This is the recommended configuration when you need to debug the MCP
   handshake or tool calls. Every byte exchanged between the MCP client
-  and `mcp_server` is written to `proxy.log` (and also forwarded to the
+  and `mcp_api_tool` is written to `proxy.log` (and also forwarded to the
   MCP client's stderr, where it is typically captured in its logs).
 
   The proxy is launched as:
@@ -368,27 +368,27 @@ def generate_configs(
 - **`{agent_id}_stdio_proxy.json`** — *not generated in this run*.
 
   The proxy is an optional stdio wrapper that forwards every byte between
-  the MCP client and `mcp_server`, writing everything to `proxy.log` and
+  the MCP client and `mcp_api_tool`, writing everything to `proxy.log` and
   to stderr. It is very useful for debugging MCP handshakes or tool calls.
 
   **To enable the proxy variant:**
 
   1. Ensure `{expected_proxy_name}` exists in the same directory as the
-     server (next to `mcp_server.py` in source mode, or next to
-     `mcp_server.exe` in packaged mode).
+     server (next to `mcp_api_tool.py` in source mode, or next to
+     `mcp_api_tool.exe` in packaged mode).
   2. Re-run the config generator, for example:
      ```
-     python mcp_server.py --generate-configs --output-dir {output_dir}
+     python mcp_api_tool.py --generate-configs --output-dir {output_dir}
      ```
      Or specify the proxy path explicitly:
      ```
-     python mcp_server.py --generate-configs --proxy-path /path/to/{expected_proxy_name}
+     python mcp_api_tool.py --generate-configs --proxy-path /path/to/{expected_proxy_name}
      ```
   3. A new `{agent_id}_stdio_proxy.json` file will appear in this directory.
 """
             proxy_heading_suffix = " (proxy not enabled)"
             proxy_extra = (
-                "*Proxy config not generated because mcp_proxy was not found. "
+                "*Proxy config not generated because mcp_api_proxy was not found. "
                 "See the instructions above to enable it.*"
             )
 
@@ -465,7 +465,7 @@ The server supports three transport modes:
 >   `_http.json` file.
 > - If you need to debug or monitor the stdio communication, use the
 >   `_stdio_proxy.json` file (if available). This wraps the server with
->   `mcp_proxy`, which logs all messages to `proxy.log` and stderr.
+>   `mcp_api_proxy`, which logs all messages to `proxy.log` and stderr.
 > - If you only need stdio without proxy, use `_stdio.json`.
 
 ### For Continue.dev
@@ -543,7 +543,7 @@ def main():
     parser.add_argument(
         "--server-script",
         required=True,
-        help="Path to mcp_server.py (or the executable)"
+        help="Path to mcp_api_tool.py (or the executable)"
     )
     parser.add_argument(
         "--endpoint",
@@ -610,7 +610,7 @@ def main():
     parser.add_argument(
         "--proxy-path",
         default=None,
-        help="Path to mcp_proxy script or executable "
+        help="Path to mcp_api_proxy script or executable "
              "(enables stdio proxy configs)"
     )
     args = parser.parse_args()

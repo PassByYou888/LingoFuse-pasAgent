@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LingoFuse LLM Service - Persistent multi-session streaming server (v3.2).
+LingoFuse LLM Service - Persistent multi-session streaming server (v3.3).
 
 Architecture
 ------------
@@ -41,17 +41,15 @@ in the startup banner.
 
 Chat Template
 -------------
-Exactly ONE chat template file is used.
+Exactly ONE chat template file may be used, and only when explicitly
+requested.
 
-Lookup order:
-  1. If --chat-template / LLM_CHAT_TEMPLATE is set, that exact path is
-     used. A missing file is a hard error.
-  2. Otherwise the service searches for `chat_template.jinja` in:
-        a) the script directory,
-        b) the script's parent directory,
-        c) the current working directory.
-     The first existing file wins.
-  3. If nothing is found, the model's built-in template is used.
+Behavior:
+  1. If --chat-template / LLM_CHAT_TEMPLATE is set to a non-empty path,
+     that exact file is loaded. A missing file is a hard error and the
+     service refuses to start.
+  2. If --chat-template is empty (the default), no template file is
+     loaded at all. The model's built-in chat template is used.
 
 The template is rendered with the following variables in scope:
     messages, add_generation_prompt, bos_token, eos_token,
@@ -60,6 +58,19 @@ The template is rendered with the following variables in scope:
 `enable_thinking` is toggled per-request via `options.thinking`.
 `reasoning_budget_message` is a plain string inserted by the template at
 the start of the thinking section.
+
+Stability Notes (long-running / unattended operation)
+-----------------------------------------------------
+- Every background loop is protected against unexpected exceptions.
+  A single failing iteration will never kill the worker or watchdog
+  thread.
+- Session state reset in `_finalize_task` is performed first and is
+  itself protected; even if later notification steps fail, a session
+  will never be left permanently stuck in the "running" state.
+- The inference stream is closed explicitly in a `finally` block, so
+  an interrupted generation does not leak the underlying generator.
+- All notification sends are best-effort; a dead client never blocks
+  the worker.
 
 Exposed Call APIs
 -----------------
@@ -164,7 +175,7 @@ def is_frozen_exe() -> bool:
 
     Detects PyInstaller (one-file or one-dir) and Nuitka by checking
     both `sys.frozen` and `sys._MEIPASS`. This mirrors the detection
-    used by llm_proxy.py, llm_test.py, mcp_server.py and mcp_proxy.py
+    used by llm_proxy.py, llm_test.py, mcp_api_tool.py and mcp_api_proxy.py
     in the same project.
     """
     return getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS')
@@ -245,14 +256,10 @@ DEFAULT_MAX_SESSIONS = 1024            # max concurrent sessions
 MAX_CLIENT_NAME_LEN = 512              # sanity bound for client_name
 MAX_HISTORY_MESSAGES = 512             # cap on messages stored per session
 
+# NOTE: This is a runtime data value, not a log message. It is prepended
+# by the chat template at the start of the thinking section to steer the
+# model's reasoning language.
 DEFAULT_REASONING_BUDGET_MESSAGE = "好的，我用简体中文来思考。禁止使用英文。\n"
-
-DEFAULT_CHAT_TEMPLATE_BASENAME = "chat_template.jinja"
-DEFAULT_CHAT_TEMPLATE_SEARCH_DIRS: Tuple[str, ...] = (
-    _SCRIPT_DIR,
-    os.path.abspath(os.path.join(_SCRIPT_DIR, "..")),
-    os.getcwd(),
-)
 
 THINK_OPEN_MARKER = "<think>"
 THINK_CLOSE_MARKER = "</think>"
@@ -280,22 +287,9 @@ SESSION_CLOSE_REASON_TIMEOUT_OFFLINE = "timeout+offline"
 # Clients should call the `get_api_capabilities` Call API (or read the
 # `api_capabilities` field of `health`) to discover this dictionary at
 # runtime, instead of hard-coding it.
-#
-# Rationale for each 0/1 value:
-#   * generate, create_session, close_session, cancel_session,
-#     list_sessions, health
-#       -> intrinsic to this server kind, supported.
-#   * set_system_message
-#       -> this file owns an in-process message history and a live
-#          llama.cpp context, so updating the global default system
-#          message is meaningful and supported. The proxy cannot
-#          support this because it is a stateless forwarder.
-#   * llm_stream
-#       -> Notify API used for streaming chunks; identical semantics in
-#          both server kinds.
 # ----------------------------------------------------------------------
 API_CAPABILITIES: Dict[str, int] = {
-    # ---- Call APIs (llm_service v3.0 exposed set) ----
+    # ---- Call APIs (llm_service exposed set) ----
     "generate":           1,   # fully implemented in-process
     "create_session":     1,   # session registry is owned by this service
     "close_session":      1,   # session registry is owned by this service
@@ -345,6 +339,8 @@ class ServiceConfig:
         self.max_sessions: int = DEFAULT_MAX_SESSIONS
 
         # ---- Chat template ----
+        # Explicit path only. Empty / None means "use the model built-in
+        # template; do NOT search the filesystem".
         self.chat_template_path: Optional[str] = None
         self.chat_template_resolved_path: Optional[str] = None
         self.default_template: Optional[str] = None
@@ -409,6 +405,12 @@ def parse_args() -> argparse.Namespace:
         f"  {invocation} --chat-template ./chat_template.jinja --debug\n"
         f"  {invocation} --session-timeout 1800 --max-sessions 64\n"
         "\n"
+        "Chat template behaviour:\n"
+        "  --chat-template is empty by default, which means NO template\n"
+        "  file is loaded and the model's built-in chat template is used.\n"
+        "  Provide an explicit path to override. A missing file is a\n"
+        "  hard error.\n"
+        "\n"
         "Relationship with llm_proxy.py:\n"
         "  Both server kinds expose the SAME Call API surface except for\n"
         "  set_system_message. Because the default endpoint\n"
@@ -451,7 +453,7 @@ def parse_args() -> argparse.Namespace:
         prog=get_invocation_name(),
         description=(
             "LingoFuse LLM Service - persistent multi-session streaming "
-            "(v3.2)"
+            "(v3.3)"
         ),
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -544,11 +546,10 @@ def parse_args() -> argparse.Namespace:
         "--chat-template",
         default=os.environ.get("LLM_CHAT_TEMPLATE", None),
         help=(
-            "Path to a Jinja2 chat template file. When omitted, the "
-            "service searches for '" + DEFAULT_CHAT_TEMPLATE_BASENAME + "' "
-            "in the script directory, its parent directory, and the "
-            "current working directory (in that order). If no file is "
-            "found, the model's built-in template is used. "
+            "Path to a Jinja2 chat template file. EMPTY BY DEFAULT, which "
+            "means NO template file is loaded and the model's built-in "
+            "chat template is used. When a non-empty path is provided, "
+            "that exact file is loaded; a missing file is a hard error. "
             "Environment variable: LLM_CHAT_TEMPLATE."
         ),
     )
@@ -616,6 +617,9 @@ def _init_global_config(args: argparse.Namespace) -> None:
 
 # ----------------------------------------------------------------------
 # Chat template loading
+#
+# Only an EXPLICIT path is honored. When no path is given, the model's
+# built-in chat template is used and no filesystem search is performed.
 # ----------------------------------------------------------------------
 def load_chat_template(path: str) -> str:
     try:
@@ -627,20 +631,15 @@ def load_chat_template(path: str) -> str:
         sys.exit(1)
 
 
-def _find_default_chat_template() -> Optional[str]:
-    seen = set()
-    for d in DEFAULT_CHAT_TEMPLATE_SEARCH_DIRS:
-        d = os.path.abspath(d)
-        if d in seen:
-            continue
-        seen.add(d)
-        candidate = os.path.join(d, DEFAULT_CHAT_TEMPLATE_BASENAME)
-        if os.path.isfile(candidate):
-            return candidate
-    return None
-
-
 def _resolve_and_load_template() -> None:
+    """
+    Resolve and load the chat template, if one was explicitly requested.
+
+    - Non-empty --chat-template / LLM_CHAT_TEMPLATE: load that exact
+      file. A missing file is a hard error.
+    - Empty / None (the default): no template file is loaded. The
+      model's built-in chat template is used.
+    """
     if CONFIG.chat_template_path:
         resolved = os.path.abspath(CONFIG.chat_template_path)
         if not os.path.isfile(resolved):
@@ -653,21 +652,11 @@ def _resolve_and_load_template() -> None:
               f"({len(CONFIG.default_template)} bytes)")
         return
 
-    found = _find_default_chat_template()
-    if found:
-        CONFIG.chat_template_resolved_path = found
-        CONFIG.default_template = load_chat_template(found)
-        print(f"[LLM] Loaded chat template (auto-discovered): {found} "
-              f"({len(CONFIG.default_template)} bytes)")
-    else:
-        CONFIG.chat_template_resolved_path = None
-        CONFIG.default_template = None
-        searched = ", ".join(
-            os.path.abspath(d) for d in DEFAULT_CHAT_TEMPLATE_SEARCH_DIRS
-        )
-        print(f"[LLM] No '{DEFAULT_CHAT_TEMPLATE_BASENAME}' found in: "
-              f"{searched}")
-        print("[LLM] Falling back to model built-in template")
+    # No explicit template: use the model's built-in chat template.
+    CONFIG.chat_template_resolved_path = None
+    CONFIG.default_template = None
+    print("[LLM] No chat template file specified; "
+          "using the model's built-in chat template")
 
 
 # ----------------------------------------------------------------------
@@ -931,7 +920,7 @@ class LLMService:
         # ---- Create server and register APIs ----
         self.server = Server(
             CONFIG.app_name,
-            "Local LLM Service with persistent multi-session streaming (v3.2)",
+            "Local LLM Service with persistent multi-session streaming (v3.3)",
         )
         self._register_apis()
         atexit.register(self.cleanup)
@@ -960,20 +949,43 @@ class LLMService:
               f"BOTH idle past the timeout AND the client is offline)")
 
     def _worker_loop(self) -> None:
+        """
+        Serial inference worker.
+
+        This loop must NEVER exit on its own. Any exception raised by a
+        task is caught here (and again by _process_task's own guard);
+        the loop continues to service the next queued task.
+        """
         while not self._shutdown_event.is_set():
             try:
                 task = self._request_queue.get(timeout=0.5)
             except queue.Empty:
                 continue
+            except Exception as e:
+                # Extremely defensive: a queue-level error should never
+                # kill the worker. Sleep briefly and try again.
+                print(f"[Worker] queue.get failed: {e}")
+                traceback.print_exc()
+                time.sleep(0.5)
+                continue
+
             if task is None:
+                # Sentinel placed by cleanup().
                 break
+
             try:
                 self._process_task(task)
             except Exception as e:
+                # _process_task has its own try/except around inference,
+                # but this outer guard catches anything raised by the
+                # bookkeeping itself.
                 print(f"[Task {task.task_id}] Worker exception: {e}")
                 traceback.print_exc()
             finally:
-                self._request_queue.task_done()
+                try:
+                    self._request_queue.task_done()
+                except Exception:
+                    pass
 
     def _watchdog_loop(self) -> None:
         """
@@ -1015,70 +1027,67 @@ class LLMService:
         will have been evicted from the cache by the time the next tick
         fires.
 
-        Running sessions are never eligible, regardless of idle time:
-        the worker thread holds the session lock while generating, and
-        it may be doing so for a long time (e.g. a 30k-token completion).
-        We simply skip any session whose status is not "idle".
+        Running sessions are never eligible, regardless of idle time.
 
-        Close reason
-        ------------
-        Sessions reclaimed by this method are closed with reason
-        "timeout+offline", which is distinct from "timeout" (a plain
-        idle timeout, no longer produced by this version) and from
-        "client" (an explicit close_session from the client). The
-        distinct reason makes it easy to distinguish the two cases in
-        logs or in a UI that inspects the `closed` event.
+        Stability
+        ---------
+        The entire per-tick body is wrapped in try/except. A single bad
+        tick (for example, a transient failure inside the LingoFuse
+        reachability cache) will never cause the watchdog thread to
+        exit. The service is designed to run unattended for long
+        periods of time.
         """
         while not self._shutdown_event.wait(timeout=5.0):
-            now = time.monotonic()
-            to_close: List[Session] = []
+            try:
+                self._watchdog_tick()
+            except Exception as e:
+                # Never let a failing tick kill the watchdog thread.
+                print(f"[Watchdog] iteration failed: {e}")
+                traceback.print_exc()
 
-            with self._sessions_lock:
-                for sess in self._sessions.values():
-                    # ---- Condition 0: only idle sessions are eligible ----
-                    # A running session is mid-generation; leave it alone.
-                    if sess.status != "idle":
-                        continue
+    def _watchdog_tick(self) -> None:
+        """One pass of the session reclamation scan."""
+        now = time.monotonic()
+        to_close: List[Session] = []
 
-                    # ---- Condition (a): idle timer expired? ----
-                    if now - sess.last_active_at <= CONFIG.session_timeout:
-                        continue
+        with self._sessions_lock:
+            for sess in self._sessions.values():
+                # ---- Condition 0: only idle sessions are eligible ----
+                if sess.status != "idle":
+                    continue
 
-                    # ---- Condition (b): client application offline? ----
-                    # check_app consults the LingoFuse reachability cache.
-                    # If the client is still online we keep the session,
-                    # so a returning client can continue where it left off.
-                    try:
-                        still_online = check_app(sess.client_name)
-                    except Exception as e:
-                        # If the reachability check itself fails, err on
-                        # the side of caution: keep the session rather
-                        # than potentially reclaiming a live one.
-                        print(f"[Watchdog] check_app('{sess.client_name}') "
-                              f"raised {e!r}; keeping session "
-                              f"{sess.session_id}")
-                        continue
+                # ---- Condition (a): idle timer expired? ----
+                if now - sess.last_active_at <= CONFIG.session_timeout:
+                    continue
 
-                    if still_online:
-                        # Client is online but chose not to talk for a
-                        # while. Keep the session so it can be resumed.
-                        # (Logged only at debug level to avoid noise;
-                        # we use enable_warning_logging as a proxy for
-                        # verbose mode.)
-                        if CONFIG.enable_warning_logging:
-                            print(f"[Watchdog] Session {sess.session_id} "
-                                  f"idle > {CONFIG.session_timeout}s but "
-                                  f"client '{sess.client_name}' is still "
-                                  f"online; keeping session")
-                        continue
+                # ---- Condition (b): client application offline? ----
+                try:
+                    still_online = check_app(sess.client_name)
+                except Exception as e:
+                    # If the reachability check itself fails, err on
+                    # the side of caution: keep the session rather
+                    # than potentially reclaiming a live one.
+                    print(f"[Watchdog] check_app('{sess.client_name}') "
+                          f"raised {e!r}; keeping session "
+                          f"{sess.session_id}")
+                    continue
 
-                    # Both conditions hold: idle past the timeout AND
-                    # client offline. Eligible for reclamation.
-                    to_close.append(sess)
+                if still_online:
+                    if CONFIG.enable_warning_logging:
+                        print(f"[Watchdog] Session {sess.session_id} "
+                              f"idle > {CONFIG.session_timeout}s but "
+                              f"client '{sess.client_name}' is still "
+                              f"online; keeping session")
+                    continue
 
-            # Close outside the lock to avoid holding it during the
-            # "closed" notification round-trip.
-            for sess in to_close:
+                # Both conditions hold: idle past the timeout AND
+                # client offline. Eligible for reclamation.
+                to_close.append(sess)
+
+        # Close outside the lock to avoid holding it during the
+        # "closed" notification round-trip.
+        for sess in to_close:
+            try:
                 idle_for = now - sess.last_active_at
                 print(f"[Session {sess.session_id}] Idle for "
                       f"{idle_for:.1f}s (> {CONFIG.session_timeout}s) and "
@@ -1087,6 +1096,9 @@ class LLMService:
                 self._close_session_internal(
                     sess, reason=SESSION_CLOSE_REASON_TIMEOUT_OFFLINE
                 )
+            except Exception as e:
+                print(f"[Watchdog] failed to close session "
+                      f"{sess.session_id}: {e}")
 
     # ------------------------------------------------------------------
     # API registration
@@ -1094,27 +1106,27 @@ class LLMService:
     def _register_apis(self) -> None:
         @self.server.expose("generate")
         def generate(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_generate(data)
+            return self._handle_generate_safe(data)
 
         @self.server.expose("create_session")
         def create_session(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_create_session(data)
+            return self._handle_create_session_safe(data)
 
         @self.server.expose("close_session")
         def close_session(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_close_session(data)
+            return self._handle_close_session_safe(data)
 
         @self.server.expose("cancel_session")
         def cancel_session(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_cancel_session(data)
+            return self._handle_cancel_session_safe(data)
 
         @self.server.expose("list_sessions")
         def list_sessions(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_list_sessions(data)
+            return self._handle_list_sessions_safe(data)
 
         @self.server.expose("set_system_message")
         def set_system_message(data: Dict[str, Any]) -> Dict[str, Any]:
-            return self._handle_set_system_message(data)
+            return self._handle_set_system_message_safe(data)
 
         @self.server.expose("get_api_capabilities")
         def get_api_capabilities(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -1127,6 +1139,63 @@ class LLMService:
         print("[Service] Registered APIs: generate, create_session, "
               "close_session, cancel_session, list_sessions, "
               "set_system_message, get_api_capabilities, health")
+
+    # ------------------------------------------------------------------
+    # Safe wrappers around the handlers
+    #
+    # LingoFuse's Server.expose already converts uncaught exceptions into
+    # an error JSON, but that error envelope differs from our own
+    # {code, error} shape. These wrappers ensure a consistent envelope
+    # and, more importantly, guarantee that a handler bug can never
+    # propagate past the LingoFuse callback boundary.
+    # ------------------------------------------------------------------
+    def _handle_generate_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_generate(data)
+        except Exception as e:
+            print(f"[Service] generate handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
+
+    def _handle_create_session_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_create_session(data)
+        except Exception as e:
+            print(f"[Service] create_session handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
+
+    def _handle_close_session_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_close_session(data)
+        except Exception as e:
+            print(f"[Service] close_session handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
+
+    def _handle_cancel_session_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_cancel_session(data)
+        except Exception as e:
+            print(f"[Service] cancel_session handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
+
+    def _handle_list_sessions_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_list_sessions(data)
+        except Exception as e:
+            print(f"[Service] list_sessions handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
+
+    def _handle_set_system_message_safe(self, data: Any) -> Dict[str, Any]:
+        try:
+            return self._handle_set_system_message(data)
+        except Exception as e:
+            print(f"[Service] set_system_message handler exception: {e}")
+            traceback.print_exc()
+            return {"code": -1, "error": f"Internal error: {e}"}
 
     # ------------------------------------------------------------------
     # Helpers
@@ -1192,11 +1261,16 @@ class LLMService:
         if existing is None:
             return False
         # Signal cancel to any currently running task.
-        with session.lock:
-            session.status = "closing"
-            if session.current_cancel_event is not None:
-                session.current_cancel_event.set()
-        # Notify the client.
+        try:
+            with session.lock:
+                session.status = "closing"
+                if session.current_cancel_event is not None:
+                    session.current_cancel_event.set()
+        except Exception as e:
+            print(f"[Session {session.session_id}] state update during "
+                  f"close failed: {e}")
+
+        # Notify the client (best effort; _send_payload never raises).
         self._emit_message_raw(session, {
             "type": "closed",
             "session_id": session.session_id,
@@ -1261,8 +1335,13 @@ class LLMService:
         # ---- Token budget check (fast; runs on callback thread) ----
         with self._system_message_lock:
             system_snapshot = session.system_message
-        error = self._check_token_budget(session, content, prompt, options,
-                                         system_snapshot)
+        try:
+            error = self._check_token_budget(session, content, prompt, options,
+                                             system_snapshot)
+        except Exception as e:
+            print(f"[Service] token budget check failed: {e}")
+            error = f"Internal error during token budget check: {e}"
+
         if error is not None:
             # If this was a newly created session and we cannot proceed,
             # roll it back so the client is not left with a dead session.
@@ -1288,6 +1367,10 @@ class LLMService:
             if mode in ("new", "ephemeral"):
                 self._close_session_internal(session, reason="error")
             return {"code": -1, "error": "Server busy: request queue is full"}
+        except Exception as e:
+            if mode in ("new", "ephemeral"):
+                self._close_session_internal(session, reason="error")
+            return {"code": -1, "error": f"Failed to enqueue task: {e}"}
 
         print(f"[Service] Task {task_id} queued (mode={mode}, "
               f"session={session.session_id}, client={session.client_name}, "
@@ -1408,11 +1491,6 @@ class LLMService:
                   ...
               }
             }
-
-        A value of 1 means the API is supported by this server,
-        0 means it is not (it belongs to the sibling server kind,
-        llm_proxy). Clients should call this API at startup or
-        before invoking any feature that may be server-kind specific.
         """
         return {
             "code": 0,
@@ -1442,9 +1520,6 @@ class LLMService:
             "queue_max_size": CONFIG.queue_max_size,
             "chat_template_path": CONFIG.chat_template_resolved_path,
             "chat_template_loaded": CONFIG.default_template is not None,
-            # The capability matrix is included in health so that a
-            # single call is enough for a client to learn everything it
-            # needs about this server kind.
             "api_capabilities": dict(API_CAPABILITIES),
         }
 
@@ -1507,23 +1582,39 @@ class LLMService:
     # Task processing (runs on worker thread)
     # ------------------------------------------------------------------
     def _process_task(self, task: GenerationTask) -> None:
+        """
+        Process a single generation task. Exceptions raised by inference
+        are converted into a task-level error; any exception that still
+        escapes this method is caught by `_worker_loop`'s outer guard.
+
+        The `_finalize_task` call is itself protected: if bookkeeping
+        raises, we still attempt a minimal fallback that resets the
+        session state so it never stays stuck in the "running" state.
+        """
         session = task.session
 
         # ---- Session may have been closed while task was queued ----
-        with self._sessions_lock:
-            if session.session_id not in self._sessions:
-                print(f"[Task {task.task_id}] Session {session.session_id} "
-                      f"no longer exists; dropping task")
-                return
+        try:
+            with self._sessions_lock:
+                if session.session_id not in self._sessions:
+                    print(f"[Task {task.task_id}] Session {session.session_id} "
+                          f"no longer exists; dropping task")
+                    return
+        except Exception as e:
+            print(f"[Task {task.task_id}] session existence check failed: {e}")
 
         # ---- Mark session as running and bind this task's cancel event ----
-        with session.lock:
-            session.status = "running"
-            session.current_cancel_event = task.cancel_event
+        try:
+            with session.lock:
+                session.status = "running"
+                session.current_cancel_event = task.cancel_event
+        except Exception as e:
+            print(f"[Task {task.task_id}] failed to mark session running: {e}")
+            return
 
         # ---- Immediate cancel check ----
         if task.cancel_event.is_set():
-            self._finalize_task(session, task, cancelled=True)
+            self._safe_finalize(session, task, cancelled=True)
             return
 
         thinking = bool(task.options.get("thinking", False))
@@ -1539,12 +1630,17 @@ class LLMService:
               f"history={len(session.messages)})")
 
         # ---- Build messages (system + history + new user) ----
-        with session.lock:
-            history = [dict(m) for m in session.messages]
-        new_user_content = task.content + "\n\n" + task.prompt
-        messages = [{"role": "system", "content": session.system_message}]
-        messages.extend(history)
-        messages.append({"role": "user", "content": new_user_content})
+        try:
+            with session.lock:
+                history = [dict(m) for m in session.messages]
+            new_user_content = task.content + "\n\n" + task.prompt
+            messages = [{"role": "system", "content": session.system_message}]
+            messages.extend(history)
+            messages.append({"role": "user", "content": new_user_content})
+        except Exception as e:
+            print(f"[Task {task.task_id}] failed to build messages: {e}")
+            self._safe_finalize(session, task, error=f"Internal error: {e}")
+            return
 
         # ---- Generate ----
         try:
@@ -1560,10 +1656,16 @@ class LLMService:
                     "transformers backend streaming is not implemented; "
                     "please use llama-cpp-python",
                 )
-                self._finalize_task(session, task, error="transformers backend unsupported")
+                self._safe_finalize(
+                    session, task,
+                    error="transformers backend unsupported",
+                )
                 return
             else:
-                self._finalize_task(session, task, error="No LLM backend available")
+                self._safe_finalize(
+                    session, task,
+                    error="No LLM backend available",
+                )
                 return
         except Exception as e:
             msg = str(e)
@@ -1574,15 +1676,34 @@ class LLMService:
                 msg = (f"Context length exceeded - maximum context size "
                        f"{CONFIG.context_size_actual} tokens")
             print(f"[Task {task.task_id}] Generation error: {msg}")
-            self._finalize_task(session, task, error=msg)
+            self._safe_finalize(session, task, error=msg)
             return
 
         # ---- Success path ----
-        self._finalize_task(
+        self._safe_finalize(
             session, task,
             think=think_text, answer=answer_text,
             cancelled=task.cancel_event.is_set(),
         )
+
+    def _safe_finalize(self, session: Session, task: GenerationTask, **kwargs) -> None:
+        """
+        Call `_finalize_task`, guaranteeing that the session state is
+        reset even if `_finalize_task` itself raises.
+        """
+        try:
+            self._finalize_task(session, task, **kwargs)
+        except Exception as e:
+            print(f"[Task {task.task_id}] finalize failed: {e}")
+            traceback.print_exc()
+            # Fallback: reset the session state so it cannot get stuck.
+            try:
+                with session.lock:
+                    session.status = "idle"
+                    session.current_cancel_event = None
+                    session.last_active_at = time.monotonic()
+            except Exception as ee:
+                print(f"[Task {task.task_id}] fallback state reset failed: {ee}")
 
     def _finalize_task(
         self,
@@ -1599,44 +1720,68 @@ class LLMService:
           - clear the running flags
           - send the appropriate terminal notification
           - if the task is ephemeral, close the session
+
+        Ordering matters: the session state reset is performed FIRST and
+        is protected by its own try/except. Even if a later notification
+        step raises, the session will not stay stuck in "running".
         """
-        # ---- Update session state ----
-        with session.lock:
-            if error is None and not cancelled:
-                user_input = (task.content + "\n\n" + task.prompt)
-                session.messages.append({"role": "user", "content": user_input})
-                assistant_msg: Dict[str, Any] = {
-                    "role": "assistant",
-                    "content": answer,
-                }
-                if think:
-                    assistant_msg["reasoning_content"] = think
-                session.messages.append(assistant_msg)
-                # Trim history if it grows too large.
-                if len(session.messages) > MAX_HISTORY_MESSAGES:
-                    drop = len(session.messages) - MAX_HISTORY_MESSAGES
-                    session.messages = session.messages[drop:]
-            session.last_active_at = time.monotonic()
-            session.status = "idle"
-            session.current_cancel_event = None
+        # ---- Step 1: update session state (MUST succeed) ----
+        try:
+            with session.lock:
+                if error is None and not cancelled:
+                    user_input = (task.content + "\n\n" + task.prompt)
+                    session.messages.append({"role": "user", "content": user_input})
+                    assistant_msg: Dict[str, Any] = {
+                        "role": "assistant",
+                        "content": answer,
+                    }
+                    if think:
+                        assistant_msg["reasoning_content"] = think
+                    session.messages.append(assistant_msg)
+                    # Trim history if it grows too large.
+                    if len(session.messages) > MAX_HISTORY_MESSAGES:
+                        drop = len(session.messages) - MAX_HISTORY_MESSAGES
+                        session.messages = session.messages[drop:]
+                session.last_active_at = time.monotonic()
+                session.status = "idle"
+                session.current_cancel_event = None
+        except Exception as e:
+            print(f"[Task {task.task_id}] state update failed: {e}")
+            # Force a minimal reset so the session is not stuck in "running".
+            try:
+                with session.lock:
+                    session.status = "idle"
+                    session.current_cancel_event = None
+            except Exception:
+                pass
 
-        # ---- Terminal notification ----
-        if error is not None:
-            self._emit_error(session, error)
-            self._emit_finish(session, "error")
-        elif cancelled:
-            self._emit_finish(session, "cancelled")
-        else:
-            self._emit_finish(session, "stop")
+        # ---- Step 2: terminal notification (best-effort) ----
+        try:
+            if error is not None:
+                self._emit_error(session, error)
+                self._emit_finish(session, "error")
+            elif cancelled:
+                self._emit_finish(session, "cancelled")
+            else:
+                self._emit_finish(session, "stop")
+        except Exception as e:
+            print(f"[Task {task.task_id}] terminal notification failed: {e}")
 
-        print(f"[Task {task.task_id}] Finished "
-              f"(session={session.session_id}, "
-              f"cancelled={cancelled}, error={bool(error)}, "
-              f"history={len(session.messages)})")
+        # ---- Step 3: log ----
+        try:
+            print(f"[Task {task.task_id}] Finished "
+                  f"(session={session.session_id}, "
+                  f"cancelled={cancelled}, error={bool(error)}, "
+                  f"history={len(session.messages)})")
+        except Exception:
+            pass
 
-        # ---- Ephemeral auto-close ----
+        # ---- Step 4: ephemeral auto-close (best-effort) ----
         if task.ephemeral:
-            self._close_session_internal(session, reason="ephemeral")
+            try:
+                self._close_session_internal(session, reason="ephemeral")
+            except Exception as e:
+                print(f"[Task {task.task_id}] ephemeral close failed: {e}")
 
     def _run_llama_cpp(
         self,
@@ -1654,72 +1799,90 @@ class LLMService:
         Drive a single streaming generation. Returns (think_text, answer_text).
         Both buffers accumulate the same text that is sent to the client
         and are used to build the assistant message stored in history.
+
+        The underlying generator is closed explicitly in a `finally`
+        block so that a mid-stream exception does not leak resources.
         """
         template = CONFIG.default_template
         think_parts: List[str] = []
         answer_parts: List[str] = []
+        stream = None
 
-        if template:
-            try:
-                from jinja2 import Template
-            except ImportError:
-                raise RuntimeError(
-                    "Chat template supplied but jinja2 is not installed"
+        try:
+            if template:
+                try:
+                    from jinja2 import Template
+                except ImportError:
+                    raise RuntimeError(
+                        "Chat template supplied but jinja2 is not installed"
+                    )
+                tpl = Template(template)
+                prompt_str = tpl.render(
+                    messages=messages,
+                    add_generation_prompt=True,
+                    bos_token="<s>",
+                    eos_token="</s>",
+                    enable_thinking=thinking,
+                    truncate_history_thinking=True,
+                    reasoning_budget_message=CONFIG.reasoning_budget_message,
                 )
-            tpl = Template(template)
-            prompt_str = tpl.render(
-                messages=messages,
-                add_generation_prompt=True,
-                bos_token="<s>",
-                eos_token="</s>",
-                enable_thinking=thinking,
-                truncate_history_thinking=True,
-                reasoning_budget_message=CONFIG.reasoning_budget_message,
-            )
-            stream = self.llm.create_completion(
-                prompt=prompt_str,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repeat_penalty=repeat_penalty,
-                stream=True,
-            )
-            chunk_key = "text"
-            parser = ThinkingParser(initial_in_thinking=thinking) if thinking else None
-        else:
-            stream = self.llm.create_chat_completion(
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                repeat_penalty=repeat_penalty,
-                stream=True,
-            )
-            chunk_key = "delta"
-            parser = ThinkingParser(initial_in_thinking=False) if thinking else None
-
-        for chunk in stream:
-            if task.cancel_event.is_set():
-                print(f"[Task {task.task_id}] Cancelled mid-stream")
-                break
-            choices = chunk.get("choices") or []
-            if not choices:
-                continue
-            choice = choices[0]
-
-            if chunk_key == "text":
-                text = choice.get("text", "") or ""
+                stream = self.llm.create_completion(
+                    prompt=prompt_str,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repeat_penalty=repeat_penalty,
+                    stream=True,
+                )
+                chunk_key = "text"
+                parser = ThinkingParser(initial_in_thinking=thinking) if thinking else None
             else:
-                delta = choice.get("delta") or {}
-                text = delta.get("content", "") or ""
+                stream = self.llm.create_chat_completion(
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                    repeat_penalty=repeat_penalty,
+                    stream=True,
+                )
+                chunk_key = "delta"
+                parser = ThinkingParser(initial_in_thinking=False) if thinking else None
 
-            if not text:
-                continue
+            for chunk in stream:
+                if task.cancel_event.is_set():
+                    print(f"[Task {task.task_id}] Cancelled mid-stream")
+                    break
+                choices = chunk.get("choices") or []
+                if not choices:
+                    continue
+                choice = choices[0]
+
+                if chunk_key == "text":
+                    text = choice.get("text", "") or ""
+                else:
+                    delta = choice.get("delta") or {}
+                    text = delta.get("content", "") or ""
+
+                if not text:
+                    continue
+
+                if parser is not None:
+                    for mtype, mtext in parser.feed(text):
+                        if not mtext:
+                            continue
+                        if mtype == "think":
+                            think_parts.append(mtext)
+                        else:
+                            answer_parts.append(mtext)
+                        self._emit_message(session, mtype, mtext)
+                else:
+                    answer_parts.append(text)
+                    self._emit_message(session, "chunk", text)
 
             if parser is not None:
-                for mtype, mtext in parser.feed(text):
+                for mtype, mtext in parser.flush():
                     if not mtext:
                         continue
                     if mtype == "think":
@@ -1727,21 +1890,18 @@ class LLMService:
                     else:
                         answer_parts.append(mtext)
                     self._emit_message(session, mtype, mtext)
-            else:
-                answer_parts.append(text)
-                self._emit_message(session, "chunk", text)
 
-        if parser is not None:
-            for mtype, mtext in parser.flush():
-                if not mtext:
-                    continue
-                if mtype == "think":
-                    think_parts.append(mtext)
-                else:
-                    answer_parts.append(mtext)
-                self._emit_message(session, mtype, mtext)
-
-        return "".join(think_parts), "".join(answer_parts)
+            return "".join(think_parts), "".join(answer_parts)
+        finally:
+            # Explicitly close the generator so a mid-stream exception
+            # cannot leave the underlying resources hanging.
+            if stream is not None:
+                closer = getattr(stream, "close", None)
+                if callable(closer):
+                    try:
+                        closer()
+                    except Exception:
+                        pass
 
     # ------------------------------------------------------------------
     # Message emission
@@ -1808,15 +1968,23 @@ class LLMService:
         self._shutdown_event.set()
 
         # Close all sessions with a shutdown notice.
-        with self._sessions_lock:
-            sessions = list(self._sessions.values())
+        try:
+            with self._sessions_lock:
+                sessions = list(self._sessions.values())
+        except Exception:
+            sessions = []
         for sess in sessions:
-            self._close_session_internal(sess, reason="shutdown")
+            try:
+                self._close_session_internal(sess, reason="shutdown")
+            except Exception as e:
+                print(f"[Service] session close during shutdown failed: {e}")
 
         # Wake the worker with a sentinel.
         try:
             self._request_queue.put_nowait(None)
         except queue.Full:
+            pass
+        except Exception:
             pass
 
         # Join worker.
@@ -1854,8 +2022,7 @@ def print_service_status() -> None:
 
     if CONFIG.chat_template_resolved_path:
         template_display = CONFIG.chat_template_resolved_path
-        template_display += (" (explicit)" if CONFIG.chat_template_path
-                             else " (auto-discovered)")
+        template_display += " (explicit)"
     else:
         template_display = "(model built-in)"
 
@@ -1870,7 +2037,7 @@ def print_service_status() -> None:
 
     lines = [
         "=" * 70,
-        " LINGOFUSE LLM SERVICE STATUS (v3.2)",
+        " LINGOFUSE LLM SERVICE STATUS (v3.3)",
         "=" * 70,
         f"  Server kind             : {SERVER_KIND}",
         f"  Backend                 : {LLM_BACKEND}",

@@ -1,49 +1,44 @@
 ﻿# =============================================================================
-# build_llm_service.ps1
+# build_mcp_api_tool.ps1
 # -----------------------------------------------------------------------------
-# Use PyInstaller to compile four Python scripts into standalone Windows
+# Use PyInstaller to compile two Python scripts into standalone Windows
 # executables:
 #
-#   1. llm_service.py     ->  llm_service.exe
-#        Local LLM inference service (llama.cpp / transformers backend)
+#   1. mcp_api_tool.py   ->  mcp_api_tool.exe
+#        MCP gateway that bridges an MCP client (LM Studio, Claude Desktop,
+#        Continue.dev, Jan, ...) to a LingoFuse backend tool provider.
+#        Uses FastMCP and language_middleware, and bundles the local
+#        `lingofuse` Python package as data.
 #
-#   2. llm_proxy.py       ->  llm_proxy.exe
-#        Pure-text forwarder to an OpenAI-compatible backend
-#        (LM Studio / Ollama / vLLM / cloud APIs)
-#
-#   3. llm_proxy_tool.py  ->  llm_proxy_tool.exe
-#        Forwarder with server-side MCP tool execution via
-#        language_middleware (LingoFuse LLM Tool Bridge, LTB)
-#
-#   4. llm_test.py        ->  llm_test.exe
-#        Interactive multi-session test client
+#   2. mcp_api_proxy.py  ->  mcp_api_proxy.exe
+#        Transparent stdio debug forwarder. Sits between the MCP client
+#        and mcp_api_tool.exe (or mcp_api_tool.py) and logs every byte
+#        exchanged to proxy.log and to stderr.
 #
 # Prerequisites:
 #   - Python 3.8+ (3.10 ~ 3.12 recommended)
 #   - PyInstaller installed: pip install pyinstaller
-#   - Runtime dependencies installed: pip install -r requirements.txt
-#   - Source files located in the current directory (or pass -SourceDir)
+#   - Runtime dependencies installed (fastmcp, pydantic, tzdata, ...)
+#   - The local `lingofuse` package must be present next to mcp_api_tool.py
 #
 # Usage (run from the src directory that contains the .py files):
-#   powershell -ExecutionPolicy Bypass -File .\build_llm_service.ps1
+#   powershell -ExecutionPolicy Bypass -File .\build_mcp_api_tool.ps1
 #
 # Optional parameters:
-#   -SourceDir <path>   Directory containing the four .py source files.
-#                       Default: the script's own directory.
+#   -SourceDir <path>   Directory containing the two .py source files and
+#                       the `lingofuse` package. Default: the directory of
+#                       this script.
 #   -OutputDir <path>   Directory for the produced EXEs.
 #                       Default: <SourceDir>\dist
-#   -BuildDir  <path>   PyInstaller work directory.
+#   -BuildDir  <path>   PyInstaller work directory (also receives the
+#                       generated .spec files).
 #                       Default: <SourceDir>\build
-#   -SkipService        Skip building llm_service.exe
-#   -SkipProxy          Skip building llm_proxy.exe
-#   -SkipProxyTool      Skip building llm_proxy_tool.exe
-#   -SkipTest           Skip building llm_test.exe
+#   -SkipTool           Skip building mcp_api_tool.exe
+#   -SkipProxy          Skip building mcp_api_proxy.exe
 #
 # Output (default):
-#   .\dist\llm_service.exe
-#   .\dist\llm_proxy.exe
-#   .\dist\llm_proxy_tool.exe
-#   .\dist\llm_test.exe
+#   .\dist\mcp_api_tool.exe
+#   .\dist\mcp_api_proxy.exe
 #
 # =============================================================================
 
@@ -52,10 +47,8 @@ param(
     [string]$SourceDir,
     [string]$OutputDir,
     [string]$BuildDir,
-    [switch]$SkipService,
-    [switch]$SkipProxy,
-    [switch]$SkipProxyTool,
-    [switch]$SkipTest
+    [switch]$SkipTool,
+    [switch]$SkipProxy
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,17 +75,17 @@ if (-not $BuildDir -or $BuildDir.Trim() -eq "") {
 # ---------------------------------------------------------------------------
 # Source file paths
 # ---------------------------------------------------------------------------
-$ServiceScript   = Join-Path $SourceDir "llm_service.py"
-$ProxyScript     = Join-Path $SourceDir "llm_proxy.py"
-$ProxyToolScript = Join-Path $SourceDir "llm_proxy_tool.py"
-$TestScript      = Join-Path $SourceDir "llm_test.py"
+$ToolScript  = Join-Path $SourceDir "mcp_api_tool.py"
+$ProxyScript = Join-Path $SourceDir "mcp_api_proxy.py"
 
-# Spec file names (PyInstaller writes them next to the CWD)
+# The `lingofuse` package must exist next to mcp_api_tool.py so that
+# `--add-data` can bundle it into the executable.
+$LingoFusePkgDir = Join-Path $SourceDir "lingofuse"
+
+# Spec file names. They are written into $BuildDir (see --specpath below).
 $SpecFiles = @(
-    "llm_service.spec",
-    "llm_proxy.spec",
-    "llm_proxy_tool.spec",
-    "llm_test.spec"
+    "mcp_api_tool.spec",
+    "mcp_api_proxy.spec"
 )
 
 # ---------------------------------------------------------------------------
@@ -100,7 +93,7 @@ $SpecFiles = @(
 # ---------------------------------------------------------------------------
 Write-Host ""
 Write-Host "===========================================================" -ForegroundColor Cyan
-Write-Host " LingoFuse LLM Toolchain Build Script" -ForegroundColor Cyan
+Write-Host " LingoFuse MCP API Tool Build Script" -ForegroundColor Cyan
 Write-Host "===========================================================" -ForegroundColor Cyan
 Write-Host "  Source directory : $SourceDir" -ForegroundColor Gray
 Write-Host "  Output directory : $OutputDir" -ForegroundColor Gray
@@ -131,10 +124,8 @@ try {
 
 Write-Host "[Check] Source files ..." -ForegroundColor Yellow
 $required = @()
-if (-not $SkipService)   { $required += $ServiceScript }
-if (-not $SkipProxy)     { $required += $ProxyScript }
-if (-not $SkipProxyTool) { $required += $ProxyToolScript }
-if (-not $SkipTest)      { $required += $TestScript }
+if (-not $SkipTool)  { $required += $ToolScript }
+if (-not $SkipProxy) { $required += $ProxyScript }
 
 if ($required.Count -eq 0) {
     Write-Host "  [ERROR] All build targets were skipped. Nothing to do." -ForegroundColor Red
@@ -149,6 +140,19 @@ foreach ($f in $required) {
     Write-Host "  [OK] $f" -ForegroundColor Green
 }
 
+# `mcp_api_tool.py` bundles the `lingofuse` package as data, so the
+# package directory must be present. Skip the check when the tool build
+# is disabled.
+if (-not $SkipTool) {
+    if (-not (Test-Path -LiteralPath $LingoFusePkgDir)) {
+        Write-Host "  [ERROR] Required package directory not found:" -ForegroundColor Red
+        Write-Host "          $LingoFusePkgDir" -ForegroundColor Red
+        Write-Host "          The 'lingofuse' package must be next to mcp_api_tool.py." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "  [OK] $LingoFusePkgDir" -ForegroundColor Green
+}
+
 Write-Host ""
 
 # ---------------------------------------------------------------------------
@@ -159,6 +163,8 @@ if (Test-Path -LiteralPath $BuildDir) {
     Remove-Item -LiteralPath $BuildDir -Recurse -Force
 }
 
+# Also remove any stale .spec files that may have been written into the
+# current working directory by a previous run of this script.
 foreach ($spec in $SpecFiles) {
     if (Test-Path -LiteralPath $spec) {
         Remove-Item -LiteralPath $spec -Force
@@ -199,97 +205,71 @@ function Invoke-PyInstaller {
 }
 
 # ---------------------------------------------------------------------------
-# 1. Build llm_service.exe
+# Common PyInstaller flags
 #
-#    llama_cpp is bundled in full because it contains native shared
-#    libraries. lingofuse is bundled as a package so that _lf_native
-#    and the pure-Python wrappers are always present.
+# --distpath / --workpath / --specpath keep all build products inside the
+# resolved directories, so the caller's current working directory is not
+# polluted. This makes the script safe to invoke from arbitrary locations
+# (for example, a CI job).
 # ---------------------------------------------------------------------------
-if (-not $SkipService) {
-    Invoke-PyInstaller -Label "[1/4] Building llm_service.exe" -Arguments @(
+$CommonFlags = @(
+    "--noconfirm",
+    "--clean",
+    "--distpath", $OutputDir,
+    "--workpath", $BuildDir,
+    "--specpath", $BuildDir
+)
+
+# ---------------------------------------------------------------------------
+# 1. Build mcp_api_tool.exe
+#
+#    - fastmcp, pydantic and tzdata are collected in full: they ship
+#      metadata and data files that PyInstaller's static analysis would
+#      otherwise drop.
+#    - language_middleware is imported under a try/except guard in the
+#      source, so PyInstaller cannot see it statically. It is declared
+#      as a hidden import explicitly.
+#    - generate_agent_json is also imported under a try/except guard and
+#      is required for `--generate-configs`. Declared as a hidden import.
+#    - The local `lingofuse` package is copied in as data so that the
+#      native-ABI ctypes module and the pure-Python wrappers are both
+#      available at runtime.
+# ---------------------------------------------------------------------------
+if (-not $SkipTool) {
+    $toolArgs = @(
         "--onefile",
-        "--name", "llm_service",
+        "--name", "mcp_api_tool",
         "--paths", $SourceDir,
-        "--collect-all", "llama_cpp",
-        "--collect-all", "lingofuse",
-        "--hidden-import", "llama_cpp",
-        "--hidden-import", "lingofuse",
-        "--hidden-import", "jinja2",
-        "--noconfirm",
-        $ServiceScript
-    )
+        "--collect-all", "fastmcp",
+        "--collect-all", "pydantic",
+        "--collect-all", "tzdata",
+        "--hidden-import", "language_middleware",
+        "--hidden-import", "generate_agent_json",
+        "--add-data", "$LingoFusePkgDir;lingofuse"
+    ) + $CommonFlags + @($ToolScript)
+
+    Invoke-PyInstaller -Label "[1/2] Building mcp_api_tool.exe" -Arguments $toolArgs
 } else {
-    Write-Host "[Skip] llm_service.exe (disabled by -SkipService)" -ForegroundColor DarkGray
+    Write-Host "[Skip] mcp_api_tool.exe (disabled by -SkipTool)" -ForegroundColor DarkGray
     Write-Host ""
 }
 
 # ---------------------------------------------------------------------------
-# 2. Build llm_proxy.exe
+# 2. Build mcp_api_proxy.exe
 #
-#    Pure-text forwarder. Uses the standard-library http.client for SSE
-#    streaming; requests is only used to probe /v1/models.
+#    A tiny stdio forwarder with no third-party dependencies. It only
+#    uses the Python standard library, so no --collect-all or --paths
+#    flags are required.
 # ---------------------------------------------------------------------------
 if (-not $SkipProxy) {
-    Invoke-PyInstaller -Label "[2/4] Building llm_proxy.exe" -Arguments @(
+    $proxyArgs = @(
         "--onefile",
-        "--name", "llm_proxy",
-        "--paths", $SourceDir,
-        "--collect-all", "lingofuse",
-        "--hidden-import", "lingofuse",
-        "--hidden-import", "requests",
-        "--hidden-import", "http.client",
-        "--hidden-import", "ssl",
-        "--noconfirm",
-        $ProxyScript
-    )
-} else {
-    Write-Host "[Skip] llm_proxy.exe (disabled by -SkipProxy)" -ForegroundColor DarkGray
-    Write-Host ""
-}
+        "--name", "mcp_api_proxy"
+    ) + $CommonFlags + @($ProxyScript)
 
-# ---------------------------------------------------------------------------
-# 3. Build llm_proxy_tool.exe
-#
-#    LingoFuse LLM Tool Bridge (LTB): same as llm_proxy.exe plus
-#    server-side MCP tool execution. Depends on language_middleware,
-#    which is an optional sibling module in the same directory. It is
-#    added explicitly as a hidden import because PyInstaller's static
-#    analysis cannot see the try/except import guard.
-# ---------------------------------------------------------------------------
-if (-not $SkipProxyTool) {
-    Invoke-PyInstaller -Label "[3/4] Building llm_proxy_tool.exe" -Arguments @(
-        "--onefile",
-        "--name", "llm_proxy_tool",
-        "--paths", $SourceDir,
-        "--collect-all", "lingofuse",
-        "--hidden-import", "lingofuse",
-        "--hidden-import", "language_middleware",
-        "--hidden-import", "requests",
-        "--hidden-import", "http.client",
-        "--hidden-import", "ssl",
-        "--noconfirm",
-        $ProxyToolScript
-    )
+    Invoke-PyInstaller -Label "[2/2] Building mcp_api_proxy.exe" -Arguments $proxyArgs
 } else {
-    Write-Host "[Skip] llm_proxy_tool.exe (disabled by -SkipProxyTool)" -ForegroundColor DarkGray
-    Write-Host ""
-}
-
-# ---------------------------------------------------------------------------
-# 4. Build llm_test.exe
-# ---------------------------------------------------------------------------
-if (-not $SkipTest) {
-    Invoke-PyInstaller -Label "[4/4] Building llm_test.exe" -Arguments @(
-        "--onefile",
-        "--name", "llm_test",
-        "--paths", $SourceDir,
-        "--collect-all", "lingofuse",
-        "--hidden-import", "lingofuse",
-        "--noconfirm",
-        $TestScript
-    )
-} else {
-    Write-Host "[Skip] llm_test.exe (disabled by -SkipTest)" -ForegroundColor DarkGray
+    Write-Host "[Skip] mcp_api_proxy.exe (disabled by -SkipProxy)" -ForegroundColor DarkGray
     Write-Host ""
 }
 
@@ -302,10 +282,8 @@ Write-Host "===========================================================" -Foregr
 Write-Host ""
 
 $expected = @()
-if (-not $SkipService)   { $expected += "llm_service.exe" }
-if (-not $SkipProxy)     { $expected += "llm_proxy.exe" }
-if (-not $SkipProxyTool) { $expected += "llm_proxy_tool.exe" }
-if (-not $SkipTest)      { $expected += "llm_test.exe" }
+if (-not $SkipTool)  { $expected += "mcp_api_tool.exe" }
+if (-not $SkipProxy) { $expected += "mcp_api_proxy.exe" }
 
 $missing = 0
 foreach ($name in $expected) {
@@ -334,25 +312,18 @@ Write-Host "  - z_ipc_64.dll           IPC engine dependency" -ForegroundColor G
 Write-Host "  - VC++ Redistributable   Visual Studio 2022 runtime" -ForegroundColor Gray
 Write-Host ""
 
-Write-Host "llm_service.exe additionally requires:" -ForegroundColor Yellow
-Write-Host "  - A GGUF model file; default name expected in the working" -ForegroundColor Gray
-Write-Host "    directory is:" -ForegroundColor Gray
-Write-Host "        NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf" -ForegroundColor Gray
-Write-Host "  - Or pass an explicit path via --model-path." -ForegroundColor Gray
+Write-Host "mcp_api_tool.exe additionally requires:" -ForegroundColor Yellow
+Write-Host "  - A running tool provider on the LingoFuse network:" -ForegroundColor Gray
+Write-Host "        pascal_agent_service.exe  (beacon, ipc:agent)" -ForegroundColor Gray
+Write-Host "        pascal_agent_api.exe      (tool provider)" -ForegroundColor Gray
+Write-Host "  - Or run with --generate-configs to emit client config files" -ForegroundColor Gray
+Write-Host "    without connecting to a backend." -ForegroundColor Gray
 Write-Host ""
 
-Write-Host "llm_proxy.exe additionally requires:" -ForegroundColor Yellow
-Write-Host "  - An OpenAI-compatible backend (LM Studio / Ollama / vLLM / cloud API)." -ForegroundColor Gray
-Write-Host "  - Specify the backend base URL via --backend-url." -ForegroundColor Gray
-Write-Host ""
-
-Write-Host "llm_proxy_tool.exe additionally requires:" -ForegroundColor Yellow
-Write-Host "  - The same backend requirement as llm_proxy.exe." -ForegroundColor Gray
-Write-Host "  - A running MCP tool provider on the LingoFuse network" -ForegroundColor Gray
-Write-Host "    (pascal_agent_service.exe + pascal_agent_api.exe) if tool" -ForegroundColor Gray
-Write-Host "    execution is desired. Without it, the executable behaves" -ForegroundColor Gray
-Write-Host "    exactly like llm_proxy.exe." -ForegroundColor Gray
-Write-Host "  - Use --no-tools to disable tool handling explicitly." -ForegroundColor Gray
+Write-Host "mcp_api_proxy.exe additionally requires:" -ForegroundColor Yellow
+Write-Host "  - A child command to launch and forward to, e.g.:" -ForegroundColor Gray
+Write-Host "        mcp_api_proxy.exe mcp_api_tool.exe --transport stdio" -ForegroundColor Gray
+Write-Host "  - All exchanged bytes are written to proxy.log next to the EXE." -ForegroundColor Gray
 Write-Host ""
 
 Write-Host "Done." -ForegroundColor Green

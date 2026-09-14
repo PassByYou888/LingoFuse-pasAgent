@@ -1,8 +1,17 @@
 # code_decl_to_mcp 使用手册
 
-**版本**：V4.0  
-**最后更新**：2026-09-12  
+**版本**：V4.1  
+**最后更新**：2026-09-14  
 **适用工具**：`code_decl_to_mcp.exe`（LingoFuse-pasAgent 工具链）
+
+**本次更新（V4.1）** 修正内容：
+- 「0. 一图总览」补入**工具源码归属**说明：本仓库**不含** `code_decl_to_mcp.exe` 的 Pascal 源码，仅提供使用手册与声明规范。
+- 「3.1 五个 Tab」中「5️⃣ Final source」补注：生成结果需要用户自行 `lazbuild` 编译。
+- 「6.2 全局变量」中 `BEACON_APP` / `REGISTER_API` / `AGENT_LOG_API` 的默认值补注，避免读者误以为是不可改的常量。
+- 「8.1 三步部署」补入第 4 步「启动工具提供者 EXE」——此前只列到「启动信标」。
+- 「9.3 信标不可用排查」流程图补入「工具提供者是否注册」分支。
+- 版本号引用统一至 2026-09-14 实际值。
+- 相关文档链接路径修正为「同目录 / `src/` 子目录」两种。
 
 ---
 
@@ -23,6 +32,8 @@ flowchart LR
 ```
 
 **一句话**：把 Pascal/C 的函数声明，自动变成 AI 可调用的 MCP 工具。
+
+> **⚠️ 工具源码归属**：本仓库（`LingoFuse-pasAgent`）**只提供** `code_decl_to_mcp` 的**使用手册**（本文档）和**声明规范**（`pascal_code_mcp_rule.md`、`C_code_mcp_rule.md`），**不包含**该工具的 Pascal 源码（`Z.Pascal_Func_Tool.pas`、`pascal_func_model.pas`、`pas_mcp_generator_tool.pas`）。这些源码属于 **LingoFuse 核心仓库**（[github.com/PassByYou888/LingoFuse](https://github.com/PassByYou888/LingoFuse)）。若需使用该工具，请从预编译发布页获取 `code_decl_to_mcp.exe`。
 
 ---
 
@@ -153,6 +164,8 @@ flowchart LR
     style T4 fill:#E67E22,stroke:#9C4A0C,stroke-width:4px,color:#FFFFFF
     style T5 fill:#E74C3C,stroke:#922B21,stroke-width:5px,color:#FFFFFF
 ```
+
+> **第 5 步是终点，不是终点线**：生成的 `.pas` 单元**不会自动编译**。你需要将生成结果复制到 Lazarus 项目中，使用 `lazbuild`（或 Lazarus IDE）编译为工具提供者 EXE。详见第 8 章。
 
 ### 3.2 底部日志区
 
@@ -423,6 +436,20 @@ flowchart LR
     style G fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#1E8449
 ```
 
+**默认值**（生成后可在源码中直接修改）：
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `MY_APP_NAME` | 由生成器根据 `unit_name` 推导 | 工具提供者注册到信标时的 App 名 |
+| `MY_APP_DESC` | `'Tool provider unit'` | 工具提供者的描述 |
+| `IPC_ENDPOINT` | `'ipc:agent'` | 信标端点 |
+| `BEACON_APP` | `'agent_main_app'` | 工具注册目标（信标中的 App 名） |
+| `REGISTER_API` | `'register_agent'` | 注册工具时调用的 API 名 |
+| `AGENT_LOG_API` | `'agent_log'` | 发送日志到信标的 API 名 |
+| `DEBUG_LOG` | `False` | 是否输出详细调试日志 |
+
+> **注意**：这些**不是**不可改的常量。生成后你可以在源码中直接修改它们，然后重新 `lazbuild` 编译。
+
 ### 6.3 导出函数
 
 ```mermaid
@@ -605,39 +632,56 @@ flowchart LR
 
 ## 8. 编译与部署
 
-### 8.1 三步部署
+### 8.1 四步部署
 
 ```mermaid
 flowchart LR
-    S1["1️⃣ lazbuild<br/>编译生成的单元"] --> S2["2️⃣ 复制 DLL<br/>LingoFuse64.dll"]
-    S2 --> S3["3️⃣ 启动信标<br/>pascal_agent_service.exe"]
+    S1["1️⃣ 生成单元<br/>code_decl_to_mcp.exe"] --> S2["2️⃣ lazbuild<br/>编译生成的单元"]
+    S2 --> S3["3️⃣ 复制 DLL<br/>LingoFuse64.dll"]
+    S3 --> S4["4️⃣ 启动信标 +<br/>工具提供者"]
 
     style S1 fill:#4A90E2,stroke:#1E3A8A,stroke-width:4px,color:#FFFFFF
-    style S2 fill:#F5A623,stroke:#B7791F,stroke-width:4px,color:#FFFFFF
-    style S3 fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
+    style S2 fill:#9B59B6,stroke:#6C3483,stroke-width:4px,color:#FFFFFF
+    style S3 fill:#F5A623,stroke:#B7791F,stroke-width:4px,color:#FFFFFF
+    style S4 fill:#2ECC71,stroke:#1E8449,stroke-width:4px,color:#FFFFFF
 ```
+
+**详解**：
+
+1. **生成单元**：在 `code_decl_to_mcp.exe` 中粘贴声明，走完 5 个 Tab，最后在「Final source」中复制生成的 `.pas` 单元。
+2. **编译生成的单元**：将 `.pas` 文件放入 Lazarus 项目，用 `lazbuild` 编译。详见 `Build_Guide.md`。
+3. **复制 DLL**：`LingoFuse64.dll` / `z_ipc_64.dll` 需要与生成的 EXE 同目录或位于 PATH。
+4. **启动信标 + 工具提供者**：
+   - 先启动 `pascal_agent_service.exe`（信标）。
+   - 再启动生成的工具提供者 EXE。它会连接信标并注册工具。
 
 ### 8.2 运行时拓扑
 
 ```mermaid
 flowchart LR
-    EXE["🎯 工具提供者 EXE"] -->|连接| Beacon["📡 信标<br/>pascal_agent_service"]
-    Beacon -->|注册工具| EXE
-    MCP["🌉 mcp_server.exe"] -->|Call API| Beacon
+    Beacon["📡 信标<br/>pascal_agent_service"] --> EXE["🎯 工具提供者 EXE"]
+    EXE -->|注册工具| Beacon
+    MCP["🌉 mcp_api_tool.exe"] -->|Call API| Beacon
+    LTB["🔴 llm_proxy_tool.exe"] -->|Call API| Beacon
     AI["🤖 AI 客户端<br/>LM Studio / Claude"] -->|MCP 协议| MCP
+    AI2["🤖 AI 客户端<br/>（不感知工具）"] -->|LF generate| LTB
 
     style EXE fill:#E74C3C,stroke:#922B21,stroke-width:5px,color:#FFFFFF
     style Beacon fill:#2ECC71,stroke:#1E8449,stroke-width:5px,color:#FFFFFF
     style MCP fill:#9B59B6,stroke:#6C3483,stroke-width:5px,color:#FFFFFF
+    style LTB fill:#922B21,stroke:#5A1A14,stroke-width:5px,color:#FFFFFF
     style AI fill:#F5A623,stroke:#B7791F,stroke-width:5px,color:#FFFFFF
+    style AI2 fill:#B7791F,stroke:#7E5109,stroke-width:5px,color:#FFFFFF
 ```
+
+**注意**：同一个工具提供者 EXE 可以**同时**被 `mcp_api_tool`（路径 A）和 `llm_proxy_tool`（路径 B）调用——二者只是"信标的客户端"。
 
 ### 8.3 完整调用链
 
 ```mermaid
 sequenceDiagram
     participant AI as 🤖 AI 客户端
-    participant MCP as 🌉 mcp_server
+    participant MCP as 🌉 mcp_api_tool
     participant Beacon as 📡 信标
     participant EXE as 🎯 工具提供者
 
@@ -701,17 +745,21 @@ flowchart TB
     E --> C1{"pascal_agent_service<br/>已启动?"}
     C1 -->|否| F1["启动信标"]
     C1 -->|是| C2{"监听 ipc:agent?"}
-    C2 -->|否| F2["检查配置"]
-    C2 -->|是| C3["LF_CheckApiEx<br/>单独测试"]
-    C3 --> F3["检查网络/防火墙"]
+    C2 -->|否| F2["检查 BEACON_APP 常量"]
+    C2 -->|是| C3{"工具提供者<br/>已注册到信标?"}
+    C3 -->|否| F3["检查 RegisterTools 调用<br/>与 REGISTER_API 常量"]
+    C3 -->|是| C4["LF_CheckApiEx<br/>单独测试"]
+    C4 --> F4["检查网络/防火墙"]
 
     style E fill:#E74C3C,stroke:#922B21,stroke-width:5px,color:#FFFFFF
     style C1 fill:#F5A623,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
     style C2 fill:#F5A623,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
-    style C3 fill:#E67E22,stroke:#9C4A0C,stroke-width:3px,color:#FFFFFF
+    style C3 fill:#F5A623,stroke:#B7791F,stroke-width:3px,color:#FFFFFF
+    style C4 fill:#E67E22,stroke:#9C4A0C,stroke-width:3px,color:#FFFFFF
     style F1 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
     style F2 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
     style F3 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
+    style F4 fill:#2ECC71,stroke:#1E8449,stroke-width:3px,color:#FFFFFF
 ```
 
 ---
@@ -746,6 +794,8 @@ flowchart TB
     style NO fill:#E74C3C,stroke:#922B21,stroke-width:5px,color:#FFFFFF
 ```
 
+> **完整规则**见同目录 `pascal_code_mcp_rule.md`。
+
 ### 10.2 C 侧
 
 ```mermaid
@@ -773,6 +823,8 @@ flowchart TB
     style OK fill:#2ECC71,stroke:#1E8449,stroke-width:5px,color:#FFFFFF
     style NO fill:#922B21,stroke:#641E16,stroke-width:5px,color:#FFFFFF
 ```
+
+> **完整规则**见同目录 `C_code_mcp_rule.md`。
 
 ### 10.3 类型归一化对照
 
@@ -890,6 +942,30 @@ flowchart TB
 
 ---
 
-**文档版本**：V4.0  
+## 12. 相关文档（同目录）
+
+| 文档 | 说明 |
+|------|------|
+| `pascal_code_mcp_rule.md` | Pascal 声明规范（解析契约） |
+| `C_code_mcp_rule.md` | C 声明规范（解析契约） |
+| `Build_Guide.md` | 编译指南（Pascal 和 Python 组件） |
+| `Dependency_Installation_Guide.md` | 依赖安装 |
+| `readme.md` | 项目总览与闭环架构 |
+| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+
+### 子目录文档（`src/`）
+
+| 文档 | 说明 |
+|------|------|
+| `src/pascal_agent_api_ref_json.md` | `agent_main` / `register_agent` JSON 结构详解 |
+| `src/LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `src/LingoFuse_LLM_Service_CLI_guide.md` | LLM 服务命令行手册 |
+| `src/LingoFuse_LLM_Proxy_CLI_Guide.md` | LLM 代理命令行手册 |
+| `src/LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 129+ 后端兼容清单 |
+| `src/LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全 |
+
+---
+
+**文档版本**：V4.1（补入工具源码归属说明、第 4 步部署说明、BEACON_APP/REGISTER_API 常量默认值、工具提供者注册排查分支）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

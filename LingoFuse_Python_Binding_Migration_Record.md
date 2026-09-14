@@ -1,14 +1,14 @@
 # LingoFuse 与 LingoFuse-pasAgent 迁移与工作总结报告
 
-> **文档版本**：V2.0  
+> **文档版本**：V2.1  
 > **最后更新**：2026-09-14  
 > **涵盖周期**：2026-08-31 ~ 2026-09-10（原始工作） / 2026-09-14（文档更新）  
 > **状态**：📜 **历史参考文档** —— 记录迁移与重构过程  
 > **相关文档**（同目录）：
 > - 项目总览：`readme.md`
-> - MCP 实施备忘：`LingoFuse_MCP_Server_Implementation_Memo.md`
-> - LLM 工具链总结（子目录）：`src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`
-> - 生态体系总览（子目录）：`src/llm-service/LingoFuse_LLM_Ecosystem_User_Guide.md`
+> - MCP 实施备忘：`LingoFuse_mcp_api_tool_Implementation_Memo.md`
+> - LLM 工具链总结（子目录）：`src/LingoFuse_LLM_Service_Work_Summary.md`
+> - 生态体系总览（子目录）：`src/LingoFuse_LLM_Ecosystem_User_Guide.md`
 
 ---
 
@@ -23,7 +23,14 @@
 5. **想了解 pasAgent 体系建设** → 读第七章。
 6. **想了解遗留问题** → 读第十一章。
 
-> **注意**：本文档为**历史参考**。最新的 LLM 工具链演进请查阅 `src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`（v4.0）。
+> **注意**：本文档为**历史参考**。最新的 LLM 工具链演进请查阅 `src/LingoFuse_LLM_Service_Work_Summary.md`（v5.0）。
+
+**本次更新（V2.1）** 修正内容：
+- 修正文档中所有过时文件名引用：`mcp_server.py` → `mcp_api_tool.py`，`mcp_proxy.py` → `mcp_api_proxy.py`，`build_mcp_server.ps1` → `build_mcp_api_tool.ps1`，`MCP_SERVER_DOUBAO_GUIDE.md` → `mcp_api_tool_DOUBAO_GUIDE.md`。
+- 更新交付物清单中的版本号至截至 2026-09-14 的实际值（`mcp_api_tool.py` v2.42、`language_middleware.py` v7.3、`generate_agent_json.py` v2.5、`mcp_api_proxy.py` v2.5）。
+- 补入此前遗漏的 **LTB（`llm_proxy_tool.py`）** 组件，并同步更新相关章节与交付物清单。
+- 补全 **`LingoFuse_LLM_*` 系列文档**（现位于 `src/`）在文档清单中的条目，移除对不存在文件的引用。
+- 明确标注哪些交付物属于 LingoFuse 核心仓库（不在本仓库中，如 `Z.LingoFuse_Export.pas`、`Z.Pascal_Func_Tool.pas` 等），避免读者在 `src/` 下找不到对应文件。
 
 ---
 
@@ -136,7 +143,7 @@ flowchart TB
 ```mermaid
 flowchart LR
     User["👤 用户"] -->|"提问"| AI["🤖 AI 客户端"]
-    AI -->|"MCP 协议"| MCP["🌉 mcp_server"]
+    AI -->|"MCP 协议"| MCP["🌉 mcp_api_tool"]
     MCP -->|"Call API"| Beacon["📡 信标"]
 
     subgraph TOOLS["📦 工具提供者"]
@@ -199,6 +206,9 @@ gantt
     缓存一致性修复           :done, c3, 2026-09-09, 1d
     离线检测修复             :done, c4, 2026-09-09, 1d
     文档与预编译包           :done, c5, 2026-09-09, 1d
+    section LLM 工具链（后续）
+    llm_proxy 引入           :done, d1, 2026-09-11, 3d
+    LTB 引入                 :done, d2, 2026-09-14, 1d
 ```
 
 ---
@@ -326,6 +336,8 @@ stateDiagram-v2
 ## 六、Pascal 工具链重构
 
 Pascal 工具链涉及三个核心单元：底层解析器、中间模型和代码生成器。
+
+> **注意**：以下三个单元（`Z.Pascal_Func_Tool.pas`、`pascal_func_model.pas`、`pas_mcp_generator_tool.pas`）属于 **LingoFuse 核心仓库**，不在本仓库（`LingoFuse-pasAgent`）中。本仓库仅提供**使用手册**（`code_generate_mcp.md`）与**声明规范**（`pascal_code_mcp_rule.md`、`C_code_mcp_rule.md`）。
 
 ### 6.1 解析器重构
 
@@ -457,7 +469,7 @@ flowchart LR
 
 **改动要点**：
 
-- `mcp_server.py` 增加 `--transport http` 选项。
+- `mcp_api_tool.py` 增加 `--transport http` 选项。
 - 保留 `--transport sse`（运行时输出弃用警告）。
 - `generate_agent_json.py` 生成三种配置：`_stdio.json`、`_http.json`、`_sse.json`。
 - 文档同步推荐 HTTP 传输。
@@ -467,14 +479,15 @@ flowchart LR
 **问题现象**：
 
 - 后端工具离线时，`agent_main` 正确跳过不可用工具。
-- 但 `mcp_server` 的 `refresh_monitor` 仍显示旧工具列表。
+- 但 `mcp_api_tool` 的 `refresh_monitor` 仍显示旧工具列表。
 - 重启子进程后问题依旧。
 
-**解决方案（v7.2）**：
+**解决方案（v7.2 / v7.3）**：
 
 - 修改 `_register_tool`：**不再修改 `self._tools`**，仅记录日志。
 - `_fetch_tools_from_backend` 中**先清空再填充**，确保每次均为权威数据。
 - 工具列表完全由 `agent_main` 驱动，避免缓存污染。
+- **（v7.3 追加）** `_reg_tool_callback` 读取字段改为 `name`（与 Pascal 端一致），原实现读 `tool_name` 导致永远失败。
 
 ### 7.4 离线检测误报修复
 
@@ -493,7 +506,7 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 | 场景 | 修复前 | 修复后 |
 |------|--------|--------|
-| 后端添加新工具 | `mcp_server` 立即显示 | 刷新后显示 |
+| 后端添加新工具 | `mcp_api_tool` 立即显示 | 刷新后显示 |
 | 后端删除工具（服务离线） | 仍显示已删除的工具 | 刷新后自动移除 |
 | `check_api` 对离线应用 | 返回 `True`（误报） | 返回 `False`（需 Pascal 补丁） |
 | 动态注册后缓存一致性 | 缓存被污染 | 与后端严格一致 |
@@ -515,6 +528,17 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 **问题**：默认 `ensure_ascii=True`，中文字符被转义为 `\uXXXX`。
 
 **修复**：在 `call_tool` 中使用 `json.dumps(arguments, ensure_ascii=False).encode('utf-8')`。
+
+### 7.7 stdio 传输全链路打通（2026-09-10）
+
+**核心攻坚**。stdio 从"完全不能连接"到"直连 / proxy 双模式可用"，共经历 7 个独立问题的定位与修复。详细过程见同目录 `LingoFuse_mcp_api_tool_Implementation_Memo.md`（v2.1）第三章 3.9 节。
+
+**关键洞察**：
+
+- MCP stdio 对启动延迟极度敏感，有效窗口仅约 5 秒。
+- Windows 的 `multiprocessing` spawn 模式重启解释器，代价高昂。
+- C 库 stdout 无法从 Python 层拦截，必须 `LF_SetOption` 关闭或在进程外过滤。
+- FastMCP 的参数类型注解是生成 JSON Schema 的唯一依据。
 
 ---
 
@@ -547,48 +571,75 @@ if Cli.Connected and Cli.LF_Service_Info_Is_Onlne and Cli.Service_Info.Find_API(
 
 ## 九、交付物清单
 
-### 9.1 LingoFuse 核心框架
+> **说明**：下表列出截至 2026-09-14 的实际交付物版本。LingoFuse 核心仓库（如 `Z.LingoFuse_*.pas`、`Z.Pascal_Func_Tool.pas`、`pascal_func_model.pas`、`pas_mcp_generator_tool.pas`）**不在本仓库中**，此处仅作为历史记录列出。
 
-| 文件 | 语言 | 说明 |
-|------|------|------|
-| `llm_service.py` | Python | 多会话流式 LLM 服务端（含日志控制） |
-| `llm_test.py` | Python | 动态会话测试客户端 |
-| `llm_client.pas` | Pascal | 动态会话客户端单元（静默错误处理） |
-| `Z.LingoFuse_Export.pas` | Pascal | 更新 `LF_FreeApp` / `LF_Shutdown` 注释 |
-| `Z.LingoFuse_Core.pas` | Pascal | 确认全局池机制 |
-| `LingoFuseBenchServer.lpr` | Pascal | 修正资源释放顺序 |
-| `core.py`, `client.py`, `server.py`, `bridge.py`, `__init__.py` | Python | 绑定更新 |
-| `test_lingofuse.py` | Python | 新增测试用例，修复导入错误 |
-| `Z.Pascal_Func_Tool.pas` | Pascal | 解析器重构 |
-| `pascal_func_model.pas` | Pascal | 深拷贝修复，跳过报告，类型归一化增强 |
-| `pas_mcp_generator_tool.pas` | Pascal | 模块化重构，增加报告支持 |
-| `lingofuse_import.pas` | Pascal | 添加 JSON 交换陷阱章节 |
+### 9.1 LingoFuse 核心框架（部分不在本仓库）
 
-### 9.2 LingoFuse-pasAgent 体系
+| 文件 | 语言 | 说明 | 位置 |
+|------|------|------|------|
+| `llm_service.py` | Python | 多会话流式 LLM 服务端（v3.3） | `src/` |
+| `llm_proxy.py` | Python | 无状态纯文本转发（v1.8） | `src/` |
+| `llm_proxy_tool.py` | Python | 转发 + 服务端侧工具执行（LTB，v2.1） | `src/` |
+| `llm_test.py` | Python | 动态会话测试客户端（v3.6） | `src/` |
+| `llm_client.pas` | Pascal | 动态会话客户端单元（v3.3） | LingoFuse 核心仓库 |
+| `Z.LingoFuse_Export.pas` | Pascal | `LF_FreeApp` / `LF_Shutdown` 注释更新 | LingoFuse 核心仓库 |
+| `Z.LingoFuse_Core.pas` | Pascal | 全局池机制确认 | LingoFuse 核心仓库 |
+| `LingoFuseBenchServer.lpr` | Pascal | 修正资源释放顺序 | LingoFuse 核心仓库 |
+| `core.py`, `client.py`, `server.py`, `bridge.py`, `__init__.py` | Python | 绑定更新 | `src/lingofuse/` |
+| `test_lingofuse.py` | Python | 新增测试用例，修复导入错误 | `src/lingofuse/` |
+| `Z.Pascal_Func_Tool.pas` | Pascal | 解析器重构 | LingoFuse 核心仓库 |
+| `pascal_func_model.pas` | Pascal | 深拷贝修复，跳过报告，类型归一化增强 | LingoFuse 核心仓库 |
+| `pas_mcp_generator_tool.pas` | Pascal | 模块化重构，增加报告支持 | LingoFuse 核心仓库 |
+| `lingofuse_import.pas` | Pascal | 添加 JSON 交换陷阱章节 | `src/` |
+
+### 9.2 LingoFuse-pasAgent 体系（本仓库）
 
 | 文件 | 版本 | 说明 |
 |------|------|------|
-| `mcp_server.py` | v2.42 | MCP 网关，自动刷新逻辑稳定 |
-| `language_middleware.py` | **v7.3** | 修复缓存污染，日志英文化 |
-| `generate_agent_json.py` | v2.5 | 配置生成器（stdio/http/sse + proxy） |
-| `mcp_proxy.py` | v2.5 | stdio 通信代理 |
-| `cross_bridge.py` | — | 重构为依赖 `bridge.py` 子进程 |
-| `build_mcp_server.ps1` | 新增 | PyInstaller 打包脚本 |
-| `build_pascal_agent.bat` | 新增 | Lazarus 一键编译脚本 |
-| `Z.Net.C4.LingoFuse.pas` | 建议补丁 | 增加离线检查 |
+| `mcp_api_tool.py` | **v2.42** | MCP 网关，stdio 主进程 + 参数类型注解 + ConsoleOutput 抑制 |
+| `language_middleware.py` | **v7.3** | `_read_string` 容错 + `ensure_ascii=False` + `reg_tool` 字段名对齐 |
+| `generate_agent_json.py` | **v2.5** | 配置生成器（stdio / http / sse + proxy） |
+| `mcp_api_proxy.py` | **v2.5** | stdio 通信代理（JSON-RPC 行过滤 + `read1` + 无 `bufsize=0`） |
+| `_lf_native.py` | v1.x | 加载信息走 stderr |
+| `cross_bridge.py` | — | 重构为依赖 `bridge.py` 子进程（示例） |
+| `build_mcp_api_tool.ps1` | 新增 | PyInstaller 打包 `mcp_api_tool.exe` + `mcp_api_proxy.exe` |
+| `build_llm_service.ps1` | 新增 | PyInstaller 打包 4 个 LLM EXE |
+| `build_bridge.ps1` | 新增 | PyInstaller 打包 `bridge.exe`（可选） |
+| `build_pascal_agent.bat` | 新增 | Lazarus 一键编译 Pascal 项目 |
+| `Z.Net.C4.LingoFuse.pas` | 建议补丁 | 增加离线检查（LingoFuse 核心仓库） |
 
-### 9.3 文档体系
+### 9.3 文档体系（本仓库）
 
-| 文档 | 状态 | 面向对象 |
+**根目录文档**：
+
+| 文档 | 版本 | 面向对象 |
 |------|------|----------|
-| `readme.md` | 已重写 | 全体用户 |
-| `MCP_SERVER_DOUBAO_GUIDE.md` | 已交付 | 零基础新手 |
-| `Build_Guide.md` | V3.0 | 需要编译的开发者 |
+| `readme.md` | — | 全体用户 |
+| `mcp_api_tool_DOUBAO_GUIDE.md` | v5.0 | 零基础新手 |
+| `Build_Guide.md` | V4.0 | 需要编译的开发者 |
 | `Dependency_Installation_Guide.md` | V3.0 | 依赖安装的开发者 |
-| `Qwen2.5-7B-Instruct-Q4_K_M.md` | 已更新（历史参考） | 想跑本地 LLM 的用户 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | V2.0 | 推荐模型下载与部署 |
-| `LingoFuse_LLM_Service_guide.md` | 已废弃 | 已迁移到子目录 |
-| `LingoFuse_MCP_Server_Implementation_Memo.md` | V2.0 | 想了解内部实现的开发者 |
+| `Qwen2.5-7B-Instruct-Q4_K_M.md` | V3.0（历史参考） | 想跑本地 LLM 的用户（旧版） |
+| `code_generate_mcp.md` | V4.0 | 代码生成器使用手册 |
+| `pascal_code_mcp_rule.md` | V4.0 | Pascal 声明规范 |
+| `C_code_mcp_rule.md` | V1.0 | C 声明规范 |
+| `Local LLM Agent Handbook CPU First, GPU Optional.md` | — | 智能体原理与本地 LLM 入门 |
+| `LingoFuse_mcp_api_tool_Implementation_Memo.md` | V2.1 | 想了解 MCP 网关内部实现的开发者 |
+| `LingoFuse_Python_Binding_Migration_Record.md` | V2.1 | **本文档** |
+
+**子目录文档（`src/`）**：
+
+| 文档 | 版本 | 说明 |
+|------|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | v4.0 | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | V2.1 | `llm_service.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | V3.0 | `llm_proxy.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | V3.0 | 129+ OpenAI 兼容后端清单 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | v3.0 | 踩坑大全 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | v5.0 | LLM 工具链版本演进总结 |
+| `llama_cpp_python_guide.md` | V2.0 | `llama-cpp-python` 安装与使用 |
+| `lingofuse/Bridge_User_Guide.md` | v2.0 | HTTP 桥接网关使用指南 |
+| `pascal_agent_api_ref_json.md` | — | `agent_main` / `register_agent` JSON 结构详解 |
 
 ### 9.4 发布物
 
@@ -636,12 +687,15 @@ flowchart LR
 | 场景 | 结果 |
 |------|------|
 | 脚本模式运行 | ✅ 正常启动，工具注册、调用成功 |
-| EXE 模式运行 | ✅ 配置生成正确，stdio/HTTP 模式正常 |
+| EXE 模式运行 | ✅ 配置生成正确，stdio / HTTP 模式正常 |
+| stdio 直连 | ✅ 稳定运行，参数正确传递 |
+| stdio + proxy | ✅ 稳定运行，C 层污染被过滤 |
 | HTTP 模式工具调用 | ✅ 中文参数完整，后端正确解析 |
 | 日志文件开关 | ✅ 默认关闭，指定 `--log-file` 后写入 |
 | 控制台中文显示 | ✅ PowerShell 下无乱码 |
-| 动态工具新增/删除 | ✅ `mcp_server` 能正确反映后端变化 |
+| 动态工具新增/删除 | ✅ `mcp_api_tool` 能正确反映后端变化 |
 | 离线检测 | ✅ `agent_main` 正确跳过不可用工具 |
+| 参数类型完整性 | ✅ FastMCP 生成正确的 JSON Schema |
 
 ### 10.5 整体兼容性
 
@@ -684,6 +738,7 @@ flowchart LR
 | Pascal 侧离线检查补丁 | 高 | 用户端应尽快应用，防止 `check_api` 误报 |
 | 监控刷新机制稳定性 | 中 | 确保异常场景下的可靠性 |
 | `nssm` 等系统服务包装 | 低 | 生产环境中用于 Windows 服务管理 |
+| 优化 mcp_api_tool 启动时间 | 高 | 若降到 2 秒内，stdio 直连更稳定 |
 
 ### 11.4 已知限制
 
@@ -693,6 +748,7 @@ flowchart LR
 | `generate_agent_json.py` 仍输出 `sse` 配置 | 完全弃用后可移除 |
 | 控制台颜色完全禁用 | 若终端支持 ANSI 可手动恢复 |
 | Pascal 后端日志中文显示可能乱码 | 调用 `SetConsoleOutputCP(CP_UTF8)` 解决 |
+| stdio 模式启动耗时 ~4.5-5 秒 | 若 MCP 客户端 initialize 超时 < 5 秒，只能用 HTTP |
 
 ---
 
@@ -726,7 +782,7 @@ mindmap
       保姆级教程
       中文显示修复
     生态建设
-      8 份以上技术文档
+      10 份以上技术文档
       仓库信息优化
       MIT 开源承诺
 ```
@@ -738,7 +794,8 @@ mindmap
 3. **可观测性增强**：统一日志系统，增加调试模式和文件日志，为所有工具链增加跳过报告，便于问题定位。
 4. **工具链现代化**：解析器输出精简（104→51 条），JSON 大小减半；代码生成器行数翻倍（603→1742），支持更多函数，模块化后维护成本大幅降低。
 5. **用户体验**：提供预编译包与保姆级教程，显著降低新手入门门槛。
-6. **文档同步**：更新或新增 8+ 份技术文档，明确 API 语义和使用指南，降低学习曲线。
+6. **文档同步**：更新或新增 10+ 份技术文档，明确 API 语义和使用指南，降低学习曲线。
+7. **stdio 打通**（后续追加）：实现 stdio 直连 / stdio+proxy / HTTP / SSE 四种模式全可用，满足不同 MCP 客户端需求。
 
 所有修改均已通过单元测试或实际运行验证，遗留问题已记录并排入后续迭代。本次工作为 LingoFuse 的工业级应用和 Pascal 生态的工具化奠定了坚实基础。
 
@@ -746,31 +803,43 @@ mindmap
 
 ## 十三、相关文档（同目录）
 
+### 根目录文档
+
 | 文档 | 说明 |
 |------|------|
 | `readme.md` | 项目总览与闭环架构 |
-| `MCP_SERVER_DOUBAO_GUIDE.md` | 新手零基础教程 |
-| `LingoFuse_MCP_Server_Implementation_Memo.md` | MCP 网关实施备忘 |
+| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `LingoFuse_mcp_api_tool_Implementation_Memo.md` | MCP 网关实施备忘 |
 | `Build_Guide.md` | 编译指南 |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
+| `Qwen2.5-7B-Instruct-Q4_K_M.md` | 旧版入门模型（历史参考） |
+| `code_generate_mcp.md` | 代码生成器使用手册 |
+| `pascal_code_mcp_rule.md` | Pascal 声明规范 |
+| `C_code_mcp_rule.md` | C 声明规范 |
+| `Local LLM Agent Handbook CPU First, GPU Optional.md` | 智能体原理与本地 LLM 入门 |
 
-### 子目录文档
+### 子目录文档（`src/`）
 
-| 文档 | 位置 | 说明 |
-|------|------|------|
-| `LingoFuse_LLM_Service_Work_Summary.md` | `src/llm-service/` | **最新** LLM 工具链版本演进总结 |
-| `LingoFuse_LLM_Ecosystem_User_Guide.md` | `src/llm-service/` | 闭环架构与生态总览 |
-| `LingoFuse_LLM_Service_CLI_guide.md` | `src/llm-service/` | LLM 服务命令行手册 |
-| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `src/llm-service/` | LLM 代理命令行手册 |
-| `LingoFuse_LLM_Pitfalls_For_AI.md` | `src/llm-service/` | 踩坑大全 |
+| 文档 | 说明 |
+|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 129+ 后端兼容清单 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | LLM 工具链版本演进总结 |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
+| `lingofuse/Bridge_User_Guide.md` | HTTP 桥接网关使用指南 |
+| `pascal_agent_api_ref_json.md` | `agent_main` / `register_agent` JSON 结构详解 |
 
 ---
 
-**文档版本**：V2.0（历史参考，高对比配色）  
+**文档版本**：V2.1（修正文件名引用、版本号、交付物清单）  
+**上一版本**：V2.0（历史参考，高对比配色）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）
 
 ---
 
-*本报告为历史参考文档，最新的 LLM 工具链演进请查阅 `src/llm-service/LingoFuse_LLM_Service_Work_Summary.md`（v4.0）。*
+*本报告为历史参考文档，最新的 LLM 工具链演进请查阅 `src/LingoFuse_LLM_Service_Work_Summary.md`（v5.0）。*

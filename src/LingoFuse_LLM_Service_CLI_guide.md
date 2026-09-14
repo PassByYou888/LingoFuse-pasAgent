@@ -1,7 +1,7 @@
 # LingoFuse LLM Service 命令行使用手册
 
 > **适用程序**：`llm_service.exe`（Windows）/ `llm_service`（Linux）  
-> **文档版本**：V2.1  
+> **文档版本**：V2.2  
 > **最后更新**：2026-09-14  
 > **相关文档**（同目录）：
 > - LLM 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
@@ -10,6 +10,15 @@
 > - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
 > - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
 > - llama-cpp-python 安装：`llama_cpp_python_guide.md`
+
+**本次更新（V2.2）** 修正内容：
+- 图 3 / 4 中的状态横幅版本号由 `v3.2` 修正为 `v3.3`（与实际 `llm_service.py` 代码一致）。
+- 5.4 节 `--chat-template` 的默认行为与「查找顺序」修正：**v3.3 起默认不再搜索目录**，只有显式指定路径时才加载模板文件；缺省时使用模型内置模板。
+- 5.4 节标题由「聊天模板与推理参数」保持，但正文中「查找顺序」小节改写为「行为说明」。
+- 「十、启动参数速查」中 `--chat-template` 一行说明同步修正。
+- 「五、参数详解」中 5.1 `--context-size` 示例增加 `0` 取值的含义说明（更明确）。
+- 第十章「相关文档」补充 `LingoFuse_LLM_Service_Work_Summary.md` 的路径说明。
+- 明确 `llm_service.exe` 与 `llm_proxy.exe` / `llm_proxy_tool.exe` 的**共存规则**（改端点 + 改 app-name）。
 
 ---
 
@@ -36,6 +45,8 @@ flowchart LR
 
 **运行环境**：Windows / Linux。  
 **依赖**：`LingoFuse64.dll` / `liblingofuse.so`（位于系统 PATH 或 exe 同目录）。
+
+> **共存规则**：`llm_service.exe`、`llm_proxy.exe`、`llm_proxy_tool.exe` 是**兄弟服务端**，默认都注册在 `ipc:llm_service` / `LLM_Service` 上。三者**同一时刻只能运行一个**。若要共存，必须为每个设置不同的 `--endpoint` 和 `--app-name`（详见同目录 `LingoFuse_LLM_Ecosystem_User_Guide.md` 第二章）。
 
 ---
 
@@ -75,7 +86,7 @@ cd /opt/llm
 
 ### 3.1 模型文件必须就位
 
-服务默认从**当前工作目录**扫描：
+服务默认从**当前工作目录**加载**固定路径**：
 
 ```
 NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
@@ -93,7 +104,9 @@ NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
 [ERROR] Model file not found: ./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
 ```
 
-> **模型下载**：请参考预编译包同目录下的模型文档，或从 Hugging Face 搜索 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF`。
+> **注意**：`llm_service.exe` **不会扫描同目录下的所有 gguf 文件**。默认只加载上述固定文件名；如使用其他模型（如 Qwen2.5-7B），必须通过 `--model-path` 显式指定。
+>
+> **模型下载**：请参考同目录 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`，或从 Hugging Face 搜索 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-GGUF`。
 
 ### 3.2 动态库必须可加载
 
@@ -171,7 +184,7 @@ flowchart LR
 
 ```
 ======================================================================
- LINGOFUSE LLM SERVICE STATUS (v3.2)
+ LINGOFUSE LLM SERVICE STATUS (v3.3)
 ======================================================================
   Server kind             : service
   Backend                 : llama_cpp
@@ -229,6 +242,11 @@ flowchart LR
 - **作用**：上下文窗口大小（token 数）。
 - **默认**：`0`（使用模型最大支持上下文）
 - **环境变量**：`LLM_CONTEXT_SIZE`
+
+**取值说明**：
+
+- `0`：使用模型的最大上下文，具体值由模型元数据决定，并在启动横幅中显示为 `Context size actual`。
+- 正数 `N`：强制使用 N tokens 的上下文窗口。可降低内存占用，但会限制对话长度。
 
 **Windows（PowerShell）**：
 
@@ -374,7 +392,7 @@ flowchart LR
 - **作用**：LingoFuse 应用名（客户端通过这个名字查找服务）。
 - **默认**：`LLM_Service`
 - **环境变量**：`LINGOFUSE_APP_NAME`
-- **注意**：若要与 `llm_proxy` 同机共存，**必须**同时改 `--endpoint` 与 `--app-name`。
+- **注意**：若要与 `llm_proxy` / `llm_proxy_tool` 同机共存，**必须**同时改 `--endpoint` 与 `--app-name`。
 
 **Windows（PowerShell）**：
 
@@ -467,6 +485,8 @@ flowchart TB
     style H fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
+> **对比**：`llm_proxy.exe` / `llm_proxy_tool.exe` 使用**单条件**回收（仅超时）。原因：代理不持有模型 KV cache，会话仅持有消息历史，回收成本低。
+
 #### `--queue-max-size N`
 
 - **作用**：待处理生成任务的最大排队数。达到上限后新请求会被拒绝。
@@ -510,12 +530,15 @@ flowchart TB
 #### `--chat-template PATH`
 
 - **作用**：指定 Jinja2 聊天模板文件路径。
-- **默认**：（空）自动在脚本目录、父目录、当前工作目录中搜索 `chat_template.jinja`
+- **默认**：（空）使用模型内置模板
 - **环境变量**：`LLM_CHAT_TEMPLATE`
-- **查找顺序**：
-  1. 若指定此参数 / 环境变量，使用该路径（文件不存在则报错退出）。
-  2. 否则在脚本目录、脚本父目录、当前工作目录中依次查找 `chat_template.jinja`。
-  3. 都没有则使用模型内置模板。
+
+**行为说明**（v3.3 起）：
+
+1. 若指定此参数 / 环境变量为**非空路径**，则**加载该文件**。文件不存在时，**报错退出**。
+2. 若为空（默认），**不加载任何模板文件**，使用**模型内置的 chat template**。**不再自动搜索目录**。
+
+> **历史变化**：v3.2 及之前的版本会在脚本目录、父目录、当前工作目录中自动搜索 `chat_template.jinja`。**v3.3 起已移除自动搜索**，仅支持显式路径。这是为了避免"磁盘上有同名文件，但用户并不想用它"造成的混淆。
 
 **Windows（PowerShell）**：
 
@@ -535,6 +558,8 @@ flowchart TB
 - **默认**：`好的，我用简体中文来思考。禁止使用英文。\n`
 - **环境变量**：`LLM_REASONING_BUDGET_MESSAGE`
 - **模板变量名**：`reasoning_budget_message`
+
+> **注意**：此参数**仅在提供了自定义 `--chat-template`** 且模板中引用了 `reasoning_budget_message` 变量时才生效。使用模型内置模板时，该参数会被忽略。
 
 **Windows（PowerShell）**：
 
@@ -748,28 +773,42 @@ source ~/.bashrc
 ./llm_service --gpu-layers 0
 ```
 
-### 场景 4：自定义端点和应用名（与 llm_proxy 共存）
+### 场景 4：与 llm_proxy 同机共存
 
 **Windows（PowerShell）**：
 
 ```powershell
+# 终端 1：llm_service 用默认端点
 .\llm_service.exe `
   --endpoint ipc:llm_service `
   --app-name LLM_Service
+
+# 终端 2：llm_proxy 换用其他端点
+.\llm_proxy.exe `
+  --endpoint ipc:llm_proxy `
+  --app-name LLM_Proxy `
+  --backend-url http://127.0.0.1:1234/v1
 ```
 
 **Linux（Shell）**：
 
 ```bash
+# 终端 1：llm_service 用默认端点
 ./llm_service \
   --endpoint ipc:llm_service \
   --app-name LLM_Service
+
+# 终端 2：llm_proxy 换用其他端点
+./llm_proxy \
+  --endpoint ipc:llm_proxy \
+  --app-name LLM_Proxy \
+  --backend-url http://127.0.0.1:1234/v1
 ```
 
 **要点**：
 
-- `llm_proxy` 需要改用 `--endpoint ipc:llm_proxy --app-name LLM_Proxy`。
-- 两者**不能**共享同一个 endpoint。
+- 二者**不能**共享同一个 `--endpoint` 和 `--app-name`。
+- 客户端连接时相应调整 `--endpoint` 与 `--server-app`。
 
 ### 场景 5：跨机部署（TCP 模式）
 
@@ -1016,8 +1055,16 @@ export LD_LIBRARY_PATH=/opt/LingoFuse/Binary:$LD_LIBRARY_PATH
 **排查**：
 
 - 是否缺少模型文件（见 Q1）。
-- 是否有另一个 `llm_service` 或 `llm_proxy` 已占用 `ipc:llm_service`（见 Q8）。
-- 查看窗口中的错误信息，或者截图发给豆包。
+- 是否有另一个 `llm_service` / `llm_proxy` / `llm_proxy_tool` 已占用 `ipc:llm_service`（见 Q8）。
+- 查看窗口中的错误信息。
+
+### Q11：自定义 chat template 未生效
+
+**排查**：
+
+- 确认 `--chat-template` 路径非空且文件确实存在（v3.3 起缺文件会报错退出）。
+- 确认**没有**依赖自动搜索功能（v3.3 起已移除）。
+- 启动横幅的 `Chat template` 字段应显示你的模板路径；若显示 `(model built-in)`，说明模板未被加载。
 
 ---
 
@@ -1029,7 +1076,7 @@ llm_service.exe [OPTIONS]        # Windows
 
 模型与推理
   --model-path PATH           GGUF 模型路径 (默认: ./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf)
-  --context-size N            上下文窗口 token 数 (默认: 0=自动)
+  --context-size N            上下文窗口 token 数 (默认: 0=使用模型最大)
   --max-tokens N              单次最大生成 token 数 (默认: 4096)
   --threads N                 CPU 线程数 (默认: 6)
   --gpu-layers N              GPU 层数, -1=全部, 0=纯CPU (默认: -1)
@@ -1047,8 +1094,8 @@ LingoFuse 服务
   --max-sessions N            最大并发会话数 (默认: 1024)
 
 聊天模板与推理
-  --chat-template PATH        自定义 Jinja2 聊天模板
-  --reasoning-budget-message  思考段引导文本
+  --chat-template PATH        自定义 Jinja2 聊天模板 (默认: 空, 使用模型内置)
+  --reasoning-budget-message  思考段引导文本 (仅在自定义模板中生效)
 
 日志与调试
   --log-level {0,1,2}         日志级别 (默认: 1)
@@ -1064,7 +1111,7 @@ LingoFuse 服务
 
 | 文档 | 说明 |
 |------|------|
-| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览（三种服务端 + 两条路径） |
 | `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册 |
 | `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单 |
 | `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
@@ -1073,6 +1120,6 @@ LingoFuse 服务
 
 ---
 
-**文档版本**：V2.1（仅保留同目录链接）  
+**文档版本**：V2.2（修正状态横幅版本号、chat template 行为、context-size 语义，补充共存规则与 chat template 排查项）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

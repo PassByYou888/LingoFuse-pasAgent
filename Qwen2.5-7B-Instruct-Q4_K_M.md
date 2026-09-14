@@ -1,14 +1,20 @@
 # Qwen2.5-7B-Instruct-Q4_K_M 模型下载与部署指南
 
-> **文档版本**：V3.0  
+> **文档版本**：V3.1  
 > **最后更新**：2026-09-14  
 > **状态**：⚠️ **历史参考文档** —— 已不再作为默认模型  
 > **相关文档**（同目录）：
 > - 项目总览与闭环架构：`readme.md`
-> - MCP 新手指南：`MCP_SERVER_DOUBAO_GUIDE.md`
+> - MCP 新手指南：`mcp_api_tool_DOUBAO_GUIDE.md`
 > - **推荐模型**：`NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`
 > - 编译指南：`Build_Guide.md`
 > - 依赖安装：`Dependency_Installation_Guide.md`
+
+**本次更新（V3.1）** 修正内容：
+- 第三章 3.2 节「自动加载机制」表述修正：`llm_service.exe` **不会**「自动扫描同目录」多个 gguf，而是使用固定的默认路径 `./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf`；使用 Qwen 模型必须通过 `--model-path` 显式指定（或把文件重命名为默认文件名）。
+- 第五章「关键部署要点」中 `pascal_decl_to_mcp.exe` 修正为 `code_decl_to_mcp.exe`（与根目录 `code_generate_mcp.md` 使用手册中的工具名一致）。
+- 相关文档链接路径修正为「根目录 / `src/` 子目录」两种，去掉已不存在的 `llm-service/` 假设。
+- 图 3 / 图 4 配色统一为高对比方案，与项目其它文档对齐。
 
 ---
 
@@ -151,9 +157,20 @@ flowchart LR
 
 **重要**：文件名必须严格匹配 **`qwen2.5-7b-instruct-q4_k_m.gguf`**（大小写敏感，请勿重命名）。若您下载的文件名不同（例如包含额外后缀），请重命名为该标准名称。
 
-### 3.2 自动加载机制
+### 3.2 加载机制
 
-`llm_service.exe` 启动时会**自动扫描**同目录下的模型文件，默认优先加载名为 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf` 的模型。若您使用 Qwen 模型，需通过 `--model-path` 显式指定。
+`llm_service.exe` **不会自动扫描同目录下的多个 gguf 文件**。它的行为是：
+
+- 若**未指定** `--model-path`，则使用**固定的默认路径** `./NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf`。如果该文件不存在，服务启动时报错退出。
+- 若**指定** `--model-path`，则加载指定路径的模型文件。
+
+因此，使用 Qwen 模型时，**必须**通过 `--model-path` 显式指定，例如：
+
+```powershell
+.\llm_service.exe --model-path .\qwen2.5-7b-instruct-q4_k_m.gguf
+```
+
+或者，把 Qwen 文件重命名为默认文件名 `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf`（不推荐，容易混淆）。
 
 ### 3.3 使用方式
 
@@ -222,8 +239,8 @@ flowchart TB
 
 - 模型文件约 **4.7 GB**，下载后**必须**与 `llm_service.exe` 放在同一目录。
 - 文件名固定为 `qwen2.5-7b-instruct-q4_k_m.gguf`，请勿更改。
-- 需通过 `--model-path` 显式指定，或重命名为 Nemotron 的默认文件名。
-- `pascal_decl_to_mcp.exe` 可生成工具声明，便于集成到 MCP 智能体系统。
+- **必须**通过 `--model-path` 显式指定，或重命名为 Nemotron 的默认文件名（不推荐）。
+- `code_decl_to_mcp.exe` 可生成工具声明，便于集成到 MCP 智能体系统。
 
 ### 图 4：迁移对比
 
@@ -275,25 +292,30 @@ flowchart LR
 
 ## 六、相关文档（同目录）
 
+### 根目录文档
+
 | 文档 | 说明 |
 |------|------|
 | `readme.md` | 项目总览与闭环架构 |
-| `MCP_SERVER_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | **推荐模型**下载与部署 |
 | `Build_Guide.md` | 编译指南 |
 | `Dependency_Installation_Guide.md` | 依赖安装 |
+| `code_generate_mcp.md` | 代码生成器使用手册 |
+| `pascal_code_mcp_rule.md` | Pascal 声明规范 |
+| `C_code_mcp_rule.md` | C 声明规范 |
 
-### 子目录文档
+### 子目录文档（`src/`）
 
-| 文档 | 位置 | 说明 |
-|------|------|------|
-| `LingoFuse_LLM_Ecosystem_User_Guide.md` | `src/llm-service/` | 闭环架构与生态总览 |
-| `LingoFuse_LLM_Service_CLI_guide.md` | `src/llm-service/` | LLM 服务命令行手册 |
-| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `src/llm-service/` | LLM 代理命令行手册 |
-| `llama_cpp_python_guide.md` | `src/llm-service/` | `llama-cpp-python` 安装与使用 |
+| 文档 | 说明 |
+|------|------|
+| `src/LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `src/LingoFuse_LLM_Service_CLI_guide.md` | LLM 服务命令行手册 |
+| `src/LingoFuse_LLM_Proxy_CLI_Guide.md` | LLM 代理命令行手册 |
+| `src/llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
 ---
 
-**文档版本**：V3.0（历史参考文档，高对比配色）  
+**文档版本**：V3.1（历史参考文档，修正自动加载表述与工具名，统一高对比配色）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

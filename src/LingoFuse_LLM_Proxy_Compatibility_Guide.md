@@ -1,7 +1,7 @@
 # LingoFuse LLM Proxy 兼容性指南
 
-> **文档版本**：V3.0  
-> **适用组件**：`llm_proxy.exe`  
+> **文档版本**：V3.1  
+> **适用组件**：`llm_proxy.exe`、`llm_proxy_tool.exe`（LTB）  
 > **最后更新**：2026-09-14  
 > **相关文档**（同目录）：
 > - 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
@@ -11,11 +11,21 @@
 > - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
 > - llama-cpp-python 安装：`llama_cpp_python_guide.md`
 
+**本次更新（V3.1）** 修正内容：
+- 标题下补充 `llm_proxy_tool.exe`（LTB）为**同样适用**的组件，避免读者误以为本文档只覆盖纯文本代理。
+- 第一章明确区分 **文本流兼容性**（本文档判据）与 **工具调用能力**（LTB 独有要求）。
+- 第十章「已知限制」中「不支持 Function Calling」修正为「**`llm_proxy.exe` 不支持 Function Calling；`llm_proxy_tool.exe`（LTB）通过服务端代管工具执行支持**」——避免误伤 LTB 场景。
+- 第十章新增一条限制：「**LTB 要求后端在 `tool_calls` 时返回标准 OpenAI 结构**」。
+- 第十一章「支持统计」表格补注「该清单对 `llm_proxy.exe` 与 `llm_proxy_tool.exe` 均适用」。
+- 全文所有「llm_proxy」在需要区分二者的语境下，明确写成「`llm_proxy.exe`（LTB 场景下为 `llm_proxy_tool.exe`）」。
+
 ---
 
 ## 一、核心支持逻辑
 
-`llm_proxy` 的兼容性判据**极其单一**——它只认一个端点模式：`POST /v1/chat/completions` 配合 `stream=true` 返回 `text/event-stream`。任何符合此协议的服务，无论它是云 API、本地服务器、网关还是桌面应用，均可通过 `--backend-url` 无缝接入。
+`llm_proxy.exe` 的兼容性判据**极其单一**——它只认一个端点模式：`POST /v1/chat/completions` 配合 `stream=true` 返回 `text/event-stream`。任何符合此协议的服务，无论它是云 API、本地服务器、网关还是桌面应用，均可通过 `--backend-url` 无缝接入。
+
+`llm_proxy_tool.exe`（**LTB**）在此判据之上**额外要求**：当请求中携带 `tools` 字段时，后端需能返回**标准 OpenAI 格式的 `tool_calls`**（详见第十章）。二者的**基础接入规则完全一致**，因此本文档所有关于**后端兼容性**的说明，**对 LTB 同样适用**。
 
 ### 图 1：兼容性判定流程
 
@@ -29,24 +39,36 @@ flowchart LR
     E -->|否| F["⚠️ 需调整"]
     E -->|是| G{"delta 含 content<br/>或 reasoning_content?"}
     G -->|否| F
-    G -->|是| H["✅ 完全兼容"]
+    G -->|是| H["✅ 文本流完全兼容"]
+    H --> I{"需要工具调用?<br/>（即 LTB 场景）"}
+    I -->|否| J["✅ llm_proxy 可用"]
+    I -->|是| K{"返回标准<br/>tool_calls 结构?"}
+    K -->|否| L["⚠️ 工具不可用，LTB 自动降级"]
+    K -->|是| M["✅ llm_proxy_tool 可用"]
 
     style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style G fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style I fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style K fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style L fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
     style H fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style J fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
+    style M fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
 ```
 
-**为什么只有这一条判据？** 因为 `llm_proxy` 的实现只做三件事：解析 URL 路径提取 `app` 和 `api`、将请求体原样转发给后端、将后端的 SSE 流逐行解析并映射为 LingoFuse 的 Notify 事件。它不解析业务数据、不校验 `Content-Type`、不关心后端的具体实现。因此，**只要后端在协议层面是 OpenAI 兼容的，`llm_proxy` 就能透传它**。
+**为什么只有这一条基础判据？** 因为 `llm_proxy.exe` 的实现只做三件事：解析 URL 路径提取 `app` 和 `api`、将请求体原样转发给后端、将后端的 SSE 流逐行解析并映射为 LingoFuse 的 Notify 事件。它不解析业务数据、不校验 `Content-Type`、不关心后端的具体实现。因此，**只要后端在协议层面是 OpenAI 兼容的，`llm_proxy.exe` 就能透传它**。
+
+`llm_proxy_tool.exe` 在此基础上增加的是**请求构造**（注入 `tools` 字段）和**响应解析**（聚合 `tool_calls` 分片），但**依旧不解析业务文本内容**。
 
 **关键匹配点**：
 
-| 匹配点 | llm_proxy 的对应实现 | 说明 |
-|--------|---------------------|------|
+| 匹配点 | llm_proxy / LTB 的对应实现 | 说明 |
+|--------|---------------------------|------|
 | `POST /v1/chat/completions` | `OpenAIStreamClient.stream_chat()` | 硬编码路径，不支持自定义 |
 | `Authorization: Bearer <key>` | `_build_headers()` | 支持自定义 header 名与 scheme |
 | `stream=true` → `text/event-stream` | `Accept-Encoding: identity` + `http.client` | 强制不压缩，禁用 Nagle |
@@ -54,6 +76,7 @@ flowchart LR
 | `choices[0].delta.content` | `_extract_delta()` | 映射为 `chunk` 事件 |
 | `choices[0].delta.reasoning_content` | `_extract_delta()` | 映射为 `think` 事件 |
 | `data: [DONE]` | `stream_chat()` 的 `return` | 流结束标记 |
+| `choices[0].delta.tool_calls`（LTB 专属） | `stream_chat()` 的累加器 | 按 `index` 拼接 `arguments` 字符串 |
 
 ---
 
@@ -224,7 +247,7 @@ flowchart LR
 
 ## 七、嵌入 / 重排序 / TTS / STT（部分支持）
 
-以下服务暴露 OpenAI 兼容端点，但 `llm_proxy` 只转发 `/v1/chat/completions`。如需要这些能力，客户端需直连。
+以下服务暴露 OpenAI 兼容端点，但 `llm_proxy.exe`（以及 LTB）只转发 `/v1/chat/completions`。如需要这些能力，客户端需直连。
 
 | 服务器 | 端点 | 兼容性理由 |
 |--------|------|------------|
@@ -290,15 +313,21 @@ llm_proxy.exe \
   --backend-key xxx \
   --backend-auth-header api-key \
   --backend-auth-scheme ""
+
+# ===== LTB（llm_proxy_tool.exe）：在以上任意命令基础上追加工具参数 =====
+llm_proxy_tool.exe \
+  --backend-url http://127.0.0.1:1234/v1 \
+  --mcp-reg-agent-app llm_proxy_agent \
+  --mcp-tool-provider-app agent_main_app
 ```
 
-> **提示**：源码模式下将 `llm_proxy.exe` 替换为 `python llm_proxy.py` 即可。
+> **提示**：源码模式下将 `llm_proxy.exe` / `llm_proxy_tool.exe` 替换为 `python llm_proxy.py` / `python llm_proxy_tool.py` 即可。
 
 ---
 
 ## 九、接入验证
 
-在将任何后端接入 `llm_proxy` 前，用以下命令验证：
+在将任何后端接入 `llm_proxy.exe`（或 LTB）前，用以下命令验证：
 
 ```bash
 curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
@@ -315,19 +344,55 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 | delta 字段 | 含 `content` 或 `reasoning_content` | 若否则扩展 `_extract_delta` |
 | 结束标记 | `data: [DONE]` | 若缺失，后端未完整实现 SSE |
 
+### 9.1 LTB 额外验证（需要工具调用时）
+
+```bash
+curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model":"<模型 id>",
+    "messages":[{"role":"user","content":"5+7 等于几？"}],
+    "stream":true,
+    "tools":[{
+      "type":"function",
+      "function":{
+        "name":"add",
+        "description":"Add two integers",
+        "parameters":{
+          "type":"object",
+          "properties":{
+            "a":{"type":"integer"},
+            "b":{"type":"integer"}
+          },
+          "required":["a","b"]
+        }
+      }
+    }]
+  }'
+```
+
+**判据**：
+
+- SSE 流中应出现 `delta.tool_calls` 字段。
+- 所有分片的 `arguments` 应按 `index` 拼接后形成合法 JSON（如 `{"a":5,"b":7}`）。
+- 若后端**始终返回纯文本而不触发 `tool_calls`**，说明模型不支持 Function Calling，或未正确配置 `tool_choice`。
+
 ---
 
 ## 十、已知限制
 
 | 限制 | 说明 |
 |------|------|
-| 不支持 Function Calling | `_extract_delta` 只识别 `content` / `reasoning_content` |
-| 不支持 `set_system_message` | 代理为无状态转发器，会话中途无法切换 system prompt |
+| **`llm_proxy.exe` 不支持 Function Calling** | 纯文本透传模式，`_extract_delta` 只识别 `content` / `reasoning_content`。**需要 Function Calling 时请用 `llm_proxy_tool.exe`（LTB）**，它在服务端代管工具调用。 |
+| **LTB 要求后端在 `tool_calls` 时返回标准 OpenAI 结构** | 即每个 `tool_call` 包含 `index` / `id` / `type: "function"` / `function.name` / `function.arguments`（字符串）。非标准结构（如自定义字段名）需修改 `OpenAIStreamClient.stream_chat` 适配。 |
+| 不支持 `set_system_message` | 代理为无状态转发器，会话中途无法切换 system prompt。LTB 同理。 |
 | 只认 `/v1/chat/completions` | 不支持 `/completions`、`/responses`、`/embeddings`、`/audio/*` |
-| options 白名单 | 仅转发 5 个字段（`max_tokens` / `temperature` / `top_p` / `top_k` / `repeat_penalty`），`tools` / `seed` / `stop` / `response_format` 等被静默丢弃 |
+| options 白名单 | 仅转发 5 个字段（`max_tokens` / `temperature` / `top_p` / `top_k` / `repeat_penalty`），`seed` / `stop` / `response_format` 等被静默丢弃。LTB 额外转发 `tools` / `tool_choice`。 |
 | Azure OpenAI | 路径含 deployment + api-version，需手工拼接到 `--backend-url` |
 | 非标准 SSE 帧 | `data:{...}` 无空格会丢帧，反代需保留原格式 |
 | 未校验 Content-Type | 后端返回非 SSE 时静默结束，客户端收到空 `finish` |
+| 不支持并发工具执行 | LTB 按顺序执行 `tool_calls`，不并发。单轮多工具场景下，串行等待可能增加延迟。 |
+| LTB 工具列表不支持运行时刷新 | 启动时拉取一次，运行期间不感知后端工具变化。需重启 LTB 才能感知。 |
 
 ---
 
@@ -337,7 +402,7 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 
 ```mermaid
 pie showData
-    title llm_proxy 支持的 129+ 后端分布
+    title llm_proxy / LTB 支持的 129+ 后端分布
     "云 API（国际）" : 30
     "云 API（中国区）" : 15
     "本地推理服务器" : 20
@@ -358,6 +423,8 @@ pie showData
 | 嵌入 / TTS / STT（部分支持） | 12+ |
 | **合计** | **129+** |
 
+> **说明**：该清单对 **`llm_proxy.exe`（纯文本代理）与 `llm_proxy_tool.exe`（LTB，服务端工具执行）均适用**。LTB 的核心差异仅在于它会在请求中注入 `tools` 字段，并要求后端在需要时返回标准 `tool_calls` 结构。基础 SSE 客户端完全一致。
+
 ---
 
 ## 十二、相关文档（同目录）
@@ -365,7 +432,7 @@ pie showData
 | 文档 | 说明 |
 |------|------|
 | `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
-| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册（LTB 参数另见 `llm_proxy_tool.py --help`） |
 | `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行手册 |
 | `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
 | `LingoFuse_LLM_Service_Work_Summary.md` | 版本演进与架构决策（历史参考） |
@@ -373,6 +440,6 @@ pie showData
 
 ---
 
-**文档版本**：V3.0（仅保留同目录链接，高对比配色）  
+**文档版本**：V3.1（区分 llm_proxy 与 LTB 的兼容性判据，修正 Function Calling 限制说明，补充 LTB 工具调用验证流程）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

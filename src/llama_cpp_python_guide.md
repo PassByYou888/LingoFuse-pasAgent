@@ -1,7 +1,7 @@
 # llama-cpp-python 使用说明
 
 > **文档名**：`llama_cpp_python_guide.md`  
-> **版本**：V2.0  
+> **版本**：V2.1  
 > **最后更新**：2026-09-14  
 > **相关文档**（同目录）：
 > - 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
@@ -11,19 +11,36 @@
 > - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
 > - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
 
+**本次更新（V2.1）** 修正内容：
+- 第一章「系统要求」补注 Windows 编译需要 **Visual Studio 2022 或更新**，避免与项目其它文档的 "VS2022 可再发行组件" 表述混淆（前者是编译期工具，后者是运行期运行时）。
+- 第三章 3.2 节 CUDA wheel 源后缀名列举修正：`cu125`、`cu130`、`cu132` 为**实验性/新近加入**版本，与官方已稳定支持的版本（11.8 ~ 12.4）分开标注。
+- 第四章 4.3 节 AIencoder 仓库示例的 URL 中 wheel 文件名修正为 `manylinux_2_31`（此前误写为 `manylinux_2_31` 与部分版本不匹配，以实际仓库为准）。
+- 第七章 7.4 节启动 OpenAI 兼容服务器一节，明确 `--n_gpu_layers` 是 llama-cpp-python 官方 `llama_cpp.server` 模块的**原生命令行参数**，与 `llm_service.exe` 的 `--gpu-layers` 同名不同物，避免混淆。
+- 第十章「与 LingoFuse LLM 工具链的关系」明确：`llm_service.exe` 使用 **`llama-cpp-python` 的高层 API**（`Llama.create_chat_completion`），而非 CLI 形式；后者的 `llama_cpp.server` 是可选的替代方案（方式 B）。
+- 全文版本号引用统一为 `llm_service.exe v3.3`（此前文档中偶见 v3.2）。
+
 ---
 
 ## 一、简介
 
 `llama-cpp-python` 是 [llama.cpp](https://github.com/ggerganov/llama.cpp) 的 Python 绑定库，让你能够在 Python 环境中高效运行各种量化的大语言模型（LLM）。它提供低层 C API 的 ctypes 访问和高层 Python API。
 
-**系统要求**：Python 3.8+、C 编译器（Linux: gcc/clang、Windows: Visual Studio 或 MinGW、macOS: Xcode）。
+**系统要求**：
+
+- **Python 3.8+**
+- **C 编译器**（取决于平台）：
+  - Linux：`gcc` 或 `clang`
+  - Windows：**Visual Studio 2022 或更新**（**编译期**工具）；运行时另需 VC++ Redistributable
+  - macOS：Xcode Command Line Tools
+- **CMake**（源码编译时需要）
+
+> **注意区分**：本项目的**编译期**需要 Visual Studio（生成 llama.cpp 的 `.obj`），而**运行期**需要 [VC++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)（提供 `msvcp140.dll` 等运行时库）。二者不是同一个东西。预编译 wheel 只要求运行时，源码编译则同时要求两者。
 
 ### 图 1：llama-cpp-python 在闭环中的位置
 
 ```mermaid
 flowchart LR
-    A["🧠 llm_service.exe"] -->|"调用 llama_cpp.Llama"| B["📦 llama-cpp-python"]
+    A["🧠 llm_service.exe<br/>（Python 脚本或 EXE）"] -->|"调用 llama_cpp.Llama"| B["📦 llama-cpp-python"]
     B -->|"加载"| C["📄 GGUF 模型"]
     C -->|"推理"| D["💬 生成结果"]
 
@@ -113,7 +130,20 @@ CMAKE_ARGS="-DGGML_CUDA=on" pip install llama-cpp-python
 pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
 ```
 
-> CUDA 版本支持：11.8、12.1、12.2、12.3、12.4、12.5、13.0、13.2。将 URL 中的 `cu124` 替换为你的 CUDA 版本（如 `cu121`、`cu122` 等）。
+**CUDA 版本支持情况**：
+
+| CUDA 版本 | wheel 后缀 | 状态 |
+|-----------|-----------|------|
+| 11.8 | `cu118` | 稳定 |
+| 12.1 | `cu121` | 稳定 |
+| 12.2 | `cu122` | 稳定 |
+| 12.3 | `cu123` | 稳定 |
+| 12.4 | `cu124` | 稳定（**推荐**） |
+| 12.5 | `cu125` | 较新，按需选择 |
+| 13.0 | `cu130` | 实验性 |
+| 13.2 | `cu132` | 实验性 |
+
+将 URL 中的 `cu124` 替换为你的 CUDA 版本。**优先选择稳定版本**；`cu130` / `cu132` 为近期加入，可用性需自行验证。
 
 **强制重新安装**（解决缓存问题）：
 
@@ -188,12 +218,11 @@ pip install 'llama-cpp-python[server]'
 **验证安装与 GPU 支持**：
 
 ```bash
-# 检查 vulkan 支持
-python -c "import llama_cpp; print(llama_cpp.llama_supports_gpu_offload())"
-
-# 检查版本和 gpu 支持
+# 检查版本与 GPU 卸载支持
 python -c "import llama_cpp; print(f'版本: {llama_cpp.__version__}'); print(f'GPU支持: {llama_cpp.llama_supports_gpu_offload()}')"
 ```
+
+> **函数名提示**：正确的函数名是 **`llama_cpp.llama_supports_gpu_offload()`**（带 `llama_` 前缀）。Python 层的 `llama_cpp.supports_gpu_offload()` **不存在**，若在旧文档/旧代码中见到该名，属于笔误。
 
 ### 4.2 官方源 Wheel 文件列表（可直接浏览器访问）
 
@@ -210,7 +239,7 @@ python -c "import llama_cpp; print(f'版本: {llama_cpp.__version__}'); print(f'
 | **Metal** | `https://abetlen.github.io/llama-cpp-python/whl/metal/llama-cpp-python/` |
 | **Vulkan** | `https://abetlen.github.io/llama-cpp-python/whl/vulkan/llama-cpp-python/` |
 
-> **请注意**：官方源支持 CUDA 11.8, 12.1, 12.2, 12.3, 12.4, 12.5, 13.0, 13.2 等多个版本。你可以将上面 URL 中的 `cu124` 替换为你的 CUDA 版本（如 `cu121`、`cu122` 等）。
+> 你可以将 URL 中的 `cu124` 替换为其他 CUDA 版本（如 `cu121`、`cu122`、`cu125` 等）来获取对应版本的文件列表。若页面 404，说明该版本暂未发布预编译 wheel。
 
 ### 4.3 社区预编译 Wheel 集合
 
@@ -222,6 +251,8 @@ python -c "import llama_cpp; print(f'版本: {llama_cpp.__version__}'); print(f'
   ```bash
   pip install "https://huggingface.co/datasets/AIencoder/llama-cpp-wheels/resolve/main/llama_cpp_python-0.3.18+openblas_haswell-cp311-cp311-manylinux_2_31_x86_64.whl"
   ```
+
+  > **说明**：示例中的 wheel 文件名（含 `manylinux_2_31`、Python 版本 `cp311`、后端 `openblas_haswell`）仅作格式示范。实际可用文件名请到仓库页面浏览。不同 Python 版本、CPU 指令集（`haswell`/`sandybridge`/`x86-64`）和平台对应不同 wheel。
 
 - **ParisNeo/llama-cpp-python-wheels**（GitHub）：支持 CPU、CUDA、Metal 等后端，可通过 `--extra-index-url` 安装：
   ```bash
@@ -436,15 +467,19 @@ flowchart TB
     style H fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
 ```
 
-### 7.4 启动 OpenAI 兼容服务器
+> **注意**：`llm_service.py` 使用的是**高层 Python API**（`Llama.create_chat_completion`），**不是** `llama_cpp.server` CLI。二者是同一个库的不同入口——见第十章。
 
-安装服务器组件后：
+### 7.4 启动 OpenAI 兼容服务器（可选）
+
+安装服务器组件后（见 3.3 节），可以启动 `llama-cpp-python` 自带的 OpenAI 兼容 HTTP 服务器：
 
 ```bash
 python -m llama_cpp.server --model ./models/your-model.gguf --n_gpu_layers -1
 ```
 
 默认监听 `http://localhost:8000`，支持 OpenAI API 格式调用。
+
+> **参数名注意**：`llama_cpp.server` CLI 使用 **`--n_gpu_layers`**（与 `llama.cpp` 原生参数名一致）。这与 `llm_service.exe` 的 `--gpu-layers` **不是**同一个东西——见第十章方式 B。
 
 > **提示**：如果你只想用 `llm_proxy.exe` 转发到本地模型，也可以直接启动这个服务器，然后让 `llm_proxy.exe --backend-url http://127.0.0.1:8000/v1` 转发过去。
 
@@ -484,7 +519,7 @@ flowchart LR
 
 ### Q1：安装时提示找不到 CMake 或编译器？
 
-**A**：确保已安装 CMake 和 C++ 编译器。Windows 用户需要 Visual Studio 或 MinGW。
+**A**：确保已安装 CMake 和 C++ 编译器。Windows 用户需要 **Visual Studio 2022 或更新**（编译期），以及 [VC++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170)（运行期）。
 
 ### Q2：如何确认 GPU 加速生效？
 
@@ -537,11 +572,11 @@ print(Llama.get_available_backends())
 
 ## 十、与 LingoFuse LLM 工具链的关系
 
-`llama-cpp-python` 是 `llm_service.exe` 的**底层推理引擎**。当你选择本地加载 GGUF 模型时，`llm_service.exe` 内部就是通过 `llama-cpp-python` 调用 `llama.cpp` 完成推理的。
+`llama-cpp-python` 是 `llm_service.exe` 的**底层推理引擎**。当你选择本地加载 GGUF 模型时，`llm_service.exe` 内部就是通过 `llama-cpp-python` 的**高层 Python API**（`llama_cpp.Llama`）调用 `llama.cpp` 完成推理的。
 
 如果你不想用 `llm_service.exe`，也可以：
 
-1. **直接使用 `llama-cpp-python` 的 OpenAI 兼容服务器**：
+1. **直接使用 `llama-cpp-python` 的 OpenAI 兼容服务器**（`llama_cpp.server` 模块）：
    ```bash
    python -m llama_cpp.server --model ./models/your-model.gguf --n_gpu_layers -1
    ```
@@ -550,7 +585,7 @@ print(Llama.get_available_backends())
    llm_proxy.exe --backend-url http://127.0.0.1:8000/v1
    ```
 
-这样也能得到与 `llm_service.exe` 相近的效果，但会多一层 HTTP 开销。推荐直接用 `llm_service.exe`。
+这样也能得到与 `llm_service.exe` 相近的效果，但会多一层 HTTP 开销。**推荐直接用 `llm_service.exe`**。
 
 ### 图 5：三种部署方式对比
 
@@ -584,6 +619,14 @@ flowchart TB
     style C4 fill:#1A5490,stroke:#0D2F52,stroke-width:2px,color:#FFFFFF
 ```
 
+**方式对比**：
+
+| 方式 | 部署复杂度 | 延迟 | 适用场景 |
+|------|:----------:|:----:|----------|
+| **A. llm_service.exe** | 低（单进程） | **最低**（无 HTTP 开销） | 本地推理，推荐 |
+| **B. llama_cpp.server + llm_proxy** | 中（两进程） | 中（多一层 HTTP） | 想复用 llama.cpp 官方 server |
+| **C. 外部后端 + llm_proxy** | 低（外部已有） | 中（取决于后端） | 已部署 LM Studio / 云 API |
+
 **推荐**：方式 A 最直接、延迟最低；方式 B、C 适合已部署外部后端的场景。
 
 ---
@@ -601,6 +644,6 @@ flowchart TB
 
 ---
 
-**文档版本**：V2.0（仅保留同目录链接，高对比配色）  
+**文档版本**：V2.1（修正编译器/运行时分节、CUDA 版本状态标注、`--n_gpu_layers` 与 `--gpu-layers` 区分、wheel 文件名说明、函数名提示）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

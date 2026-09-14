@@ -1,10 +1,158 @@
-# ============================================================
-# LingoFuse MCP Server 核心依赖
-# ============================================================
-# 运行 mcp_server.py 必需
-fastmcp>=0.1.0          # MCP 服务器框架
-pydantic>=2.0.0,<3.0.0  # fastmcp 依赖
+# =============================================================================
+# LingoFuse LLM Service / Proxy / Tool Bridge / Test Client — Dependencies
+# =============================================================================
+#
+# Applies to these components:
+#   - llm_service.py      Local LLM inference service (llama.cpp / transformers)
+#   - llm_proxy.py        Forwarder to an OpenAI-compatible backend
+#   - llm_proxy_tool.py   Forwarder with server-side MCP tool execution (LTB)
+#   - llm_test.py         Interactive multi-session test client
+#   - bridge.py           HTTP bridge gateway
+#
+# Install:
+#   pip install -r requirements.txt
+#
+# Windows long path support (PyTorch / llama-cpp-python builds can hit the
+# 260-character path limit). Run the following in an elevated PowerShell:
+#   New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
+#     -Name "LongPathsEnabled" -Value 1 -PropertyType DWORD -Force
+#
+# Python version: >= 3.8 (3.10 ~ 3.12 recommended)
+# =============================================================================
 
-# ---------- 以下为可选（仅当使用 bridge.py 时需要） ----------
-flask>=2.0.0           # HTTP 网关（bridge.py）
-requests>=2.25.0       # HTTP 客户端（bridge.py 测试用）
+
+# -----------------------------------------------------------------------------
+# 1. Common dependencies — required by all components
+# -----------------------------------------------------------------------------
+
+# HTTP client:
+#   - llm_proxy.py and llm_proxy_tool.py use it to probe the backend
+#     `/v1/models` endpoint.
+#   - bridge.py uses it for internal request forwarding.
+requests>=2.31.0
+
+# The LingoFuse Python bindings call the dynamic library directly via
+# ctypes, so the package itself has no additional Python dependency.
+# If the `lingofuse` package is not installed, ensure PYTHONPATH includes
+# its parent directory:
+#   Linux / macOS:
+#     export PYTHONPATH="/path/to/LingoFuse/Py:$PYTHONPATH"
+#   Windows (PowerShell):
+#     $env:PYTHONPATH = "D:\LingoFuse\Py;$env:PYTHONPATH"
+
+
+# -----------------------------------------------------------------------------
+# 2. HTTP bridge gateway — required by bridge.py
+# -----------------------------------------------------------------------------
+
+# Only needed when running bridge.py:
+#   python bridge.py --endpoint ipc:xxx --app xxx --port 8081
+flask>=2.3.0
+
+
+# -----------------------------------------------------------------------------
+# 3. Local LLM inference — required by llm_service.py (choose ONE backend)
+# -----------------------------------------------------------------------------
+#
+# llm_service.py auto-detects an available backend. Priority:
+#   1. llama-cpp-python    (recommended; CPU / CUDA / Vulkan / Metal)
+#   2. transformers + torch (fallback; pure Python stack)
+#
+# Only one of the two is required.
+#
+# NOTE: If you only run llm_proxy.py or llm_proxy_tool.py (forwarding to
+#       LM Studio / Ollama / a cloud API), you can skip this entire section.
+# -----------------------------------------------------------------------------
+
+# --- Option A: llama-cpp-python (recommended) ---
+
+# By default this compiles from source and requires a local C/C++ toolchain
+# (Windows: Visual Studio or MinGW). Build time is roughly 5 ~ 20 minutes.
+#
+# To install a prebuilt wheel instead (recommended, no compilation):
+#   CPU:
+#     pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+#   CUDA 12.4:
+#     pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu124
+#   Metal (macOS):
+#     pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/metal
+#   Vulkan:
+#     pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/vulkan
+#
+# See llama_cpp_python_guide.md for the full installation guide.
+llama-cpp-python>=0.3.0
+
+
+# --- Option B: transformers + torch (fallback) ---
+#
+# Enable only when NOT using llama-cpp-python.
+# NOTE: llm_service.py does not currently implement streaming generation
+#       for the transformers backend, so Option A is strongly recommended.
+#       The two lines below are provided for experimentation only.
+
+# transformers>=4.40.0
+# torch>=2.0.0
+
+
+# -----------------------------------------------------------------------------
+# 4. Chat template rendering — optional for llm_service.py
+# -----------------------------------------------------------------------------
+
+# Required only when a custom Jinja2 chat template is used, i.e. when
+# --chat-template / LLM_CHAT_TEMPLATE is set to a non-empty path.
+# When no template is specified (the default), the model's built-in chat
+# template is used and jinja2 is not needed.
+jinja2>=3.1.0
+
+
+# -----------------------------------------------------------------------------
+# 5. Packaging into executables — developer only, not a runtime dependency
+# -----------------------------------------------------------------------------
+
+# Install only when building .py files into .exe files.
+#   pyinstaller --onefile mcp_api_tool.py
+#   pyinstaller --onefile llm_proxy.py
+#   ...
+# pyinstaller>=6.0.0
+
+
+# -----------------------------------------------------------------------------
+# 6. Development and testing helpers — optional
+# -----------------------------------------------------------------------------
+
+# Unit tests
+# pytest>=7.0
+
+# Code formatting and static analysis
+# black
+# flake8
+
+
+# -----------------------------------------------------------------------------
+# 7. Dependencies NOT installed via pip
+# -----------------------------------------------------------------------------
+#
+# The following components are provided by the system and are not
+# installable through pip:
+#
+#   LingoFuse64.dll / liblingofuse.so / liblingofuse.dylib
+#       Core dynamic library. Must be on the system PATH or placed next to
+#       the .py / .exe file.
+#       Download: https://github.com/PassByYou888/LingoFuse/releases
+#
+#   z_ipc_64.dll / libz_ipc.so
+#       IPC engine dependency; lives next to the LingoFuse dynamic library.
+#
+#   GGUF model file
+#       Example: NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.gguf
+#       Place it next to llm_service*.exe, or pass --model-path.
+#       See NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md.
+#
+#   OpenAI-compatible backend (optional)
+#       Required when using llm_proxy.py or llm_proxy_tool.py. Start one of:
+#         - LM Studio Local Server   (https://lmstudio.ai)
+#         - Ollama                   (https://ollama.com)
+#         - vLLM / SGLang / TGI      (self-hosted)
+#       Or use a cloud API: DeepSeek / SiliconFlow / OpenRouter / Groq, etc.
+#
+# =============================================================================

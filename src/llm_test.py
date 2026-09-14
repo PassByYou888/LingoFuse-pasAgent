@@ -132,7 +132,7 @@ def is_frozen_exe() -> bool:
 
     Detects PyInstaller (one-file or one-dir) and Nuitka by checking
     both `sys.frozen` and `sys._MEIPASS`. This mirrors the detection
-    used by llm_service.py, llm_proxy.py, mcp_server.py and mcp_proxy.py
+    used by llm_service.py, llm_proxy.py, mcp_api_tool.py and mcp_api_proxy.py
     in the same project.
     """
     return getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS')

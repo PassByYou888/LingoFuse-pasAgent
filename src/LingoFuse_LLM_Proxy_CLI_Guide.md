@@ -1,7 +1,7 @@
 # LingoFuse LLM Proxy 命令行使用手册
 
 > **适用程序**：`llm_proxy.exe`（Windows）/ `llm_proxy`（Linux）  
-> **文档版本**：V3.0  
+> **文档版本**：V3.1  
 > **最后更新**：2026-09-14  
 > **相关文档**（同目录）：
 > - LLM 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
@@ -10,6 +10,14 @@
 > - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
 > - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
 > - llama-cpp-python 安装：`llama_cpp_python_guide.md`
+
+**本次更新（V3.1）** 修正内容：
+- 开头「一、程序定位」补入 **LTB（`llm_proxy_tool.exe`）** 的定位说明与差异对照表，避免读者误以为本手册仅覆盖纯文本代理。
+- 「二、llm_service vs llm_proxy：兄弟关系」表格补入 `llm_proxy_tool.exe` 列，明确三者关系。
+- 「五、参数详解」新增 `llm_proxy_tool.exe` 独有参数段（MCP 工具相关），此前仅列 `llm_proxy.exe` 参数。
+- 「七、完整使用场景」补充「场景 11：用 llm_proxy_tool 让客户端零改动享受工具」。
+- 「九、启动参数速查」新增 `llm_proxy_tool.exe` 独有参数速查块。
+- 「十、相关文档」明确指出 LTB 的参数以 `llm_proxy_tool.py --help` 为权威来源。
 
 ---
 
@@ -20,6 +28,17 @@
 它把 LingoFuse 的二进制 RPC 翻译成 OpenAI 兼容的 HTTP 请求，转发给任意支持 `/v1/chat/completions` + SSE 流式的后端（LM Studio、Ollama、vLLM、DeepSeek、OpenRouter 等），再把流式响应翻译回 LingoFuse 的 Notify 事件。
 
 它是 pasAgent 闭环中 **`llm_service.exe` 的替代方案**：当你不想在本地加载大模型，或者已经部署了 LM Studio / 云端 API 时，用 `llm_proxy.exe` 就能让 AI 客户端拥有“大脑”。
+
+### 与 LTB（llm_proxy_tool.exe）的关系
+
+`llm_proxy_tool.exe`（**LTB**，LLM Tool Bridge）是 `llm_proxy.exe` 的**超集**：
+
+- **`llm_proxy.exe`**：纯文本转发。工具执行由**客户端负责**（客户端需自己支持 MCP）。
+- **`llm_proxy_tool.exe`**：转发 + **服务端代管工具执行**。客户端**完全不需要**支持 MCP，只要会调 `generate` 就能享受工具能力。
+
+二者**共享相同的 SSE 客户端实现**，因此本手册中所有关于**后端接入**（`--backend-url` / `--backend-model` / `--backend-key` / 认证头 / SSE 流解析）的说明，**对 LTB 同样适用**。
+
+LTB 独有参数（`--mcp-*`、`--max-tool-*`、`--enable-tools` 等）见第五章 5.7 节及 `llm_proxy_tool.py --help`。
 
 ### 图 1：llm_proxy 在闭环中的位置
 
@@ -44,9 +63,9 @@ flowchart LR
 
 ## 二、llm_service vs llm_proxy：兄弟关系
 
-两者是**兄弟服务端**，共享同一套 Call API 面，但**不能同时运行**（默认共用同一个 endpoint 和 app 名）。
+三者是**兄弟服务端**，共享同一套 Call API 面，但**不能同时运行**（默认共用同一个 endpoint 和 app 名）。
 
-### 图 2：两种服务端对比
+### 图 2：三种服务端对比
 
 ```mermaid
 flowchart TB
@@ -55,6 +74,7 @@ flowchart TB
         A2["有状态：持有 KV cache"]
         A3["支持 set_system_message"]
         A4["需要 20 GB 模型文件"]
+        A5["工具执行：客户端负责"]
     end
 
     subgraph B["🟣 llm_proxy.exe"]
@@ -62,35 +82,55 @@ flowchart TB
         B2["无状态：每轮重建 messages"]
         B3["不支持 set_system_message"]
         B4["只需一个 OpenAI 兼容后端"]
+        B5["工具执行：客户端负责"]
+    end
+
+    subgraph C["🔴 llm_proxy_tool.exe（LTB）"]
+        C1["不加载模型"]
+        C2["无状态：每轮重建 messages"]
+        C3["不支持 set_system_message"]
+        C4["转发 + 服务端代管工具执行"]
+        C5["客户端零改动享受工具"]
     end
 
     style A fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
     style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style A1 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
     style A2 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
     style A3 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
     style A4 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
+    style A5 fill:#D5F5E3,stroke:#1E8449,stroke-width:2px,color:#0E4D2A
     style B1 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
     style B2 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
     style B3 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
     style B4 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style B5 fill:#F4ECF7,stroke:#5B2C6F,stroke-width:2px,color:#321640
+    style C1 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style C2 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style C3 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style C4 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
+    style C5 fill:#FADBD8,stroke:#922B21,stroke-width:2px,color:#5A1A14
 ```
 
 **能力矩阵对比**：
 
-| API | llm_service.exe | llm_proxy.exe |
-|-----|:---------------:|:-------------:|
-| `generate` | ✅ 1 | ✅ 1 |
-| `create_session` | ✅ 1 | ✅ 1 |
-| `close_session` | ✅ 1 | ✅ 1 |
-| `cancel_session` | ✅ 1 | ✅ 1 |
-| `list_sessions` | ✅ 1 | ✅ 1 |
-| **`set_system_message`** | ✅ **1** | ❌ **0** |
-| `health` | ✅ 1 | ✅ 1 |
-| `llm_stream` | ✅ 1 | ✅ 1 |
-| **`server_kind`** | `"service"` | `"proxy"` |
+| API | llm_service.exe | llm_proxy.exe | llm_proxy_tool.exe（LTB） |
+|-----|:---------------:|:-------------:|:-------------------------:|
+| `generate` | ✅ 1 | ✅ 1 | ✅ 1 |
+| `create_session` | ✅ 1 | ✅ 1 | ✅ 1 |
+| `close_session` | ✅ 1 | ✅ 1 | ✅ 1 |
+| `cancel_session` | ✅ 1 | ✅ 1 | ✅ 1 |
+| `list_sessions` | ✅ 1 | ✅ 1 | ✅ 1 |
+| **`set_system_message`** | ✅ **1** | ❌ **0** | ❌ **0** |
+| `health` | ✅ 1 | ✅ 1 | ✅ 1 |
+| `llm_stream` | ✅ 1 | ✅ 1 | ✅ 1 |
+| **`tools`** | — | — | ✅ **1** |
+| **`tool_calls`** | — | — | ✅ **1** |
+| **`tool_results`** | — | — | ✅ **1** |
+| **`server_kind`** | `"service"` | `"proxy"` | `"proxy"` |
 
-> **共存规则**：若两者都想运行，**必须**同时改 `--endpoint` 和 `--app-name`。详见场景 8。
+> **共存规则**：若三者都想运行，**必须**为每个设置不同的 `--endpoint` 和 `--app-name`。详见场景 8。
 
 ---
 
@@ -185,6 +225,8 @@ flowchart TB
 | 3 | SSE 帧格式为 `data: {...}\n\n`（`data:` 后带空格） | 无空格会丢帧 |
 | 4 | delta 中含 `choices[0].delta.content` 或 `reasoning_content` | 否则解析为空 |
 | 5 | 不强制 gzip 压缩 | 代理已设置 `Accept-Encoding: identity` |
+
+> **重要**：上述 5 条判据**对 LTB 同样适用**。LTB 的 `OpenAIStreamClient` 与 `llm_proxy` 完全一致。唯一的区别是：LTB 会在请求中额外注入 `tools` 字段（来自 MCP 工具列表），并要求后端能返回 `tool_calls`。
 
 ### 图 4：接入验证流程
 
@@ -663,6 +705,8 @@ chmod 600 api_key.txt
 ./llm_proxy --session-timeout 7200
 ```
 
+> **注意**：`llm_proxy` 的会话回收为**单条件**（仅判断空闲超时），与 `llm_service` 的**双条件**（空闲超时 + 客户端离线）不同。原因：代理不持有模型 KV cache，会话仅持有消息历史，回收成本低。
+
 ### 5.4 日志参数
 
 #### `--log-level {DEBUG,INFO,WARNING,ERROR}`
@@ -691,9 +735,7 @@ chmod 600 api_key.txt
 ./llm_proxy --log-level WARNING
 ```
 
----
-
-## 六、环境变量一览
+### 5.5 环境变量一览
 
 所有命令行参数均可用同名环境变量替代。适合在启动脚本或系统服务中统一配置。
 
@@ -715,7 +757,7 @@ chmod 600 api_key.txt
 | `LLM_PROXY_SESSION_TIMEOUT` | `--session-timeout` | `1800` |
 | `LLM_PROXY_LOG_LEVEL` | `--log-level` | `INFO` |
 
-### 6.1 Windows（PowerShell）
+**Windows（PowerShell）**：
 
 ```powershell
 $env:LLM_PROXY_BACKEND_URL   = "https://api.deepseek.com/v1"
@@ -724,14 +766,7 @@ $env:LLM_PROXY_BACKEND_MODEL = "deepseek-chat"
 .\llm_proxy.exe
 ```
 
-**永久生效**（写入用户环境变量）：
-
-```powershell
-[System.Environment]::SetEnvironmentVariable(
-  "LLM_PROXY_BACKEND_URL", "https://api.deepseek.com/v1", "User")
-```
-
-### 6.2 Linux（Shell）
+**Linux（Shell）**：
 
 ```bash
 export LLM_PROXY_BACKEND_URL="https://api.deepseek.com/v1"
@@ -740,19 +775,40 @@ export LLM_PROXY_BACKEND_MODEL="deepseek-chat"
 ./llm_proxy
 ```
 
-**永久生效**（写入 `~/.bashrc`）：
-
-```bash
-echo 'export LLM_PROXY_BACKEND_URL="https://api.deepseek.com/v1"' >> ~/.bashrc
-echo 'export LLM_PROXY_BACKEND_KEY="sk-xxxxxxxxxxxx"' >> ~/.bashrc
-source ~/.bashrc
-```
-
 **优先级**：命令行参数 > 环境变量 > 内置默认值。
+
+### 5.6 LTB（llm_proxy_tool.exe）独有参数
+
+LTB 完整参数以 `llm_proxy_tool.py --help` 为权威来源。此处仅列出**常用项**：
+
+| 参数 | 默认值 | 说明 |
+|------|:------:|------|
+| `--enable-tools` / `--no-tools` | enabled | 是否启用工具（禁用时行为等价 `llm_proxy`） |
+| `--mcp-endpoint` | `ipc:agent` | 信标端点 |
+| `--mcp-reg-agent-app` | `llm_proxy_agent` | **必须**与 `mcp_api_tool` 的 `reg_agent` 不同 |
+| `--mcp-tool-provider-app` | `agent_main_app` | 工具提供者 App 名 |
+| `--max-tool-rounds` | 100 | 单次 `generate` 内最大往返轮次 |
+| `--max-total-tool-calls` | 50 | 单次 `generate` 内最多执行工具次数 |
+| `--max-tools-per-round` | 10 | 单轮最多处理多少个 tool_calls |
+| `--max-tool-result-chars` | 8000 | 单条工具结果最大字符数 |
+| `--max-total-tool-result-chars` | 200000 | 单次 `generate` 内所有工具结果总和上限 |
+| `--max-history-chars` | 200000 | 单会话消息历史字符数上限 |
+
+对应的环境变量前缀为 `LLM_PROXY_MCP_*`、`LLM_PROXY_MAX_TOOL_*` 等，具体以 `llm_proxy_tool.py --help` 为准。
+
+**启动示例**：
+
+```powershell
+# 路径 B：客户端只发 generate，LTB 代管工具调用
+.\llm_proxy_tool.exe `
+  --backend-url http://127.0.0.1:1234/v1 `
+  --mcp-reg-agent-app llm_proxy_agent `
+  --mcp-tool-provider-app agent_main_app
+```
 
 ---
 
-## 七、完整使用场景
+## 六、完整使用场景
 
 ### 场景 1：连接 LM Studio
 
@@ -946,7 +1002,7 @@ source ~/.bashrc
 - 客户端通过 `--endpoint` 指定远程 IP。
 - 防火墙需放行 `9898` 端口。
 
-### 场景 8：与 llm_service 同机共存
+### 场景 8：三种服务端同机共存（全部改端点）
 
 **Windows（PowerShell）**：
 
@@ -959,6 +1015,13 @@ source ~/.bashrc
   --endpoint ipc:llm_proxy `
   --app-name LLM_Proxy `
   --backend-url http://127.0.0.1:1234/v1
+
+# 终端 3：llm_proxy_tool 换用其他端点
+.\llm_proxy_tool.exe `
+  --endpoint ipc:llm_proxy_tool `
+  --app-name LLM_Proxy_Tool `
+  --backend-url http://127.0.0.1:1234/v1 `
+  --mcp-reg-agent-app llm_proxy_agent
 ```
 
 **Linux（Shell）**：
@@ -972,24 +1035,34 @@ source ~/.bashrc
   --endpoint ipc:llm_proxy \
   --app-name LLM_Proxy \
   --backend-url http://127.0.0.1:1234/v1
+
+# 终端 3：llm_proxy_tool 换用其他端点
+./llm_proxy_tool \
+  --endpoint ipc:llm_proxy_tool \
+  --app-name LLM_Proxy_Tool \
+  --backend-url http://127.0.0.1:1234/v1 \
+  --mcp-reg-agent-app llm_proxy_agent
 ```
 
 **要点**：
 
-- 两者**必须**使用不同的 `--endpoint` 和 `--app-name`。
+- 三者**必须**使用不同的 `--endpoint` 和 `--app-name`。
 - 客户端连接时相应调整 `--endpoint` 与 `--server-app`。
 
-### 图 5：同机共存的两个服务端
+### 图 5：同机共存的三个服务端
 
 ```mermaid
 flowchart LR
     A["🧠 llm_service.exe<br/>ipc:llm_service / LLM_Service"] --> C["🤖 客户端 A"]
     B["🌉 llm_proxy.exe<br/>ipc:llm_proxy / LLM_Proxy"] --> D["🤖 客户端 B"]
+    E["🔴 llm_proxy_tool.exe<br/>ipc:llm_proxy_tool / LLM_Proxy_Tool"] --> F["🤖 客户端 C"]
 
     style A fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
     style B fill:#8E44AD,stroke:#5B2C6F,stroke-width:3px,color:#FFFFFF
+    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style C fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style D fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style F fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
 ```
 
 ### 场景 9：调试模式
@@ -1051,9 +1124,55 @@ chmod 600 ./secrets/deepseek.key
 - 避免密钥出现在命令行历史。
 - Linux 下建议设置文件权限为 `600`。
 
+### 场景 11：用 LTB 让客户端零改动享受工具
+
+**前提**：
+
+1. 信标（`pascal_agent_service.exe`）已启动并监听 `ipc:agent`。
+2. 工具提供者（`pascal_agent_api.exe` 或自己的工具）已启动并注册到信标。
+3. 后端（LM Studio / DeepSeek 等）已启动并支持 `tool_calls`。
+
+**启动 LTB**：
+
+```powershell
+.\llm_proxy_tool.exe `
+  --backend-url http://127.0.0.1:1234/v1 `
+  --mcp-reg-agent-app llm_proxy_agent `
+  --mcp-tool-provider-app agent_main_app `
+  --enable-tools `
+  --max-tool-rounds 100 `
+  --max-total-tool-calls 50
+```
+
+**客户端行为**：
+
+- 客户端（如 Pascal GUI 客户端）只调 `generate(content, client_name)`，完全不知道工具体系。
+- LTB 内部：向后端请求（携带 `tools`）→ 收到 `tool_calls` → 通过 `language_middleware` 调用 Pascal 工具 → 把结果回填为 `role=tool` 消息 → 继续请求后端 → 直到模型给出最终文本。
+- 客户端只收到 `chunk` / `think` / `finish` 流，**没有** `tool_calls` / `tool_result` 消息类型。
+
+**关键日志**：
+
+```
+[INFO] MCP middleware ready: 8 tool(s) cached
+[DEBUG] Task xxx round 0/100: msgs=2 tools=yes
+[DEBUG] Task xxx round 0: executing 1 of 1 tool call(s)
+[DEBUG]   -> add({"a":5,"b":7})
+[DEBUG]   <- {"result": 12}
+[DEBUG] Task xxx round 1/100: msgs=4 tools=yes
+[DEBUG] Task xxx round 1: final answer (5 chars)
+```
+
+**与 `mcp_api_tool` 同时运行**：
+
+- `mcp_api_tool` 用默认 `--reg-agent-app reg_agent`。
+- `llm_proxy_tool` 用默认 `--mcp-reg-agent-app llm_proxy_agent`。
+- 二者名字不同，可同时运行，共享同一信标。
+
+**注意**：LTB 与 `mcp_api_tool` 可共存，但 LTB 与 `llm_service` / `llm_proxy` 因默认共享同一 `ipc:llm_service` 端点，**不能同时运行**（除非改端点）。
+
 ---
 
-## 八、故障排查
+## 七、故障排查
 
 ### Q1：启动时报 `--backend-extra-headers is not valid JSON`
 
@@ -1119,13 +1238,13 @@ curl.exe -N -X POST http://127.0.0.1:1234/v1/chat/completions `
 
 ### Q4：客户端 `/sys` 命令失败
 
-**原因**：`llm_proxy` 不支持 `set_system_message`。
+**原因**：`llm_proxy` / `llm_proxy_tool` 不支持 `set_system_message`。
 
 **解决**：使用“新建会话”路径，把 system message 通过 `create_session` 的 `system_message` 字段传入。详见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P6-3。
 
 ### Q5：启动时提示 `Queue "llm_service0" is already occupied`
 
-**原因**：同机已有 `llm_service` 或另一个 `llm_proxy` 在监听 `ipc:llm_service`。
+**原因**：同机已有 `llm_service` 或另一个 `llm_proxy` / `llm_proxy_tool` 在监听 `ipc:llm_service`。
 
 **解决**：
 
@@ -1179,9 +1298,38 @@ curl.exe -X POST https://api.deepseek.com/v1/chat/completions `
 
 详见同目录 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P0-4。
 
+### Q9：LTB 启动了但工具不执行
+
+**原因**（逐项排查）：
+
+1. `--enable-tools` 被 `--no-tools` 关闭。
+2. `language_middleware` 未安装或导入失败。
+3. 信标（`pascal_agent_service.exe`）未启动。
+4. 工具提供者（`pascal_agent_api.exe`）未启动。
+
+**解决**：确认日志中出现 `MCP middleware ready: N tool(s) cached`（N > 0）。若为 0 或显示 `pre-connect did not yield any tools`，逐项排查上述 4 点。详见 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P7-1。
+
+### Q10：LTB 与 mcp_api_tool 同时启动时冲突
+
+**原因**：二者使用相同的 `reg_agent` 名字。
+
+**解决**：
+
+- `mcp_api_tool` 用 `--reg-agent-app reg_agent`（默认）。
+- `llm_proxy_tool` 用 `--mcp-reg-agent-app llm_proxy_agent`（默认）。
+- **不要修改默认值**，二者注册名不同即可共存。详见 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P7-2。
+
+### Q11：LTB 报 `LF_PrepareDone returned 0`
+
+**原因**：middleware 与 `Server.start()` 竞争。LingoFuse 的 `LF_PrepareDone()` 在同一进程内只有第一次调用返回 1，`Server.start()` 先执行会导致 middleware 的 `_connect()` 永久失败。
+
+**解决**：LTB 源码 `LLMProxyToolService.start()` 已按正确顺序（先 `_ensure_tools_ready()`，后 `self.server.start()`）实现，**不要改动此顺序**。详见 `LingoFuse_LLM_Pitfalls_For_AI.md` 中 P7-3。
+
 ---
 
-## 九、启动参数速查
+## 八、启动参数速查
+
+### 8.1 llm_proxy.exe
 
 ```
 llm_proxy.exe [OPTIONS]          # Windows
@@ -1213,21 +1361,52 @@ LingoFuse 服务
 环境变量与参数一一对应 (前缀 LLM_PROXY_*)
 ```
 
+### 8.2 llm_proxy_tool.exe（LTB）额外参数
+
+```
+llm_proxy_tool.exe [OPTIONS]          # Windows
+./llm_proxy_tool [OPTIONS]            # Linux
+
+（以上 8.1 中所有参数均适用，此外新增以下 LTB 独有参数）
+
+工具（MCP）
+  --enable-tools          启用工具（默认）
+  --no-tools              禁用工具，退化为纯文本代理
+  --mcp-endpoint ADDRESS  信标端点 (默认: ipc:agent)
+  --mcp-reg-agent-app NAME 注册应用名 (默认: llm_proxy_agent)
+  --mcp-tool-provider-app NAME 工具提供者 App 名 (默认: agent_main_app)
+  --mcp-timeout MS        MCP 调用超时 (默认: 5000)
+
+多轮循环上限
+  --max-tool-rounds N     单次 generate 最大往返轮次 (默认: 100)
+  --max-total-tool-calls N 单次 generate 最多执行工具次数 (默认: 50)
+  --max-tools-per-round N 单轮最多处理多少个 tool_calls (默认: 10)
+
+结果长度截断
+  --max-tool-result-chars N 单条工具结果最大字符数 (默认: 8000)
+  --max-total-tool-result-chars N 所有工具结果总和上限 (默认: 200000)
+  --max-history-chars N   单会话消息历史字符数上限 (默认: 200000)
+
+权威来源：llm_proxy_tool.py --help
+```
+
 ---
 
-## 十、相关文档（同目录）
+## 九、相关文档（同目录）
 
 | 文档 | 说明 |
 |------|------|
-| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览（三种服务端 + 两条路径） |
 | `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行手册 |
-| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单 |
+| `LingoFuse_LLM_Proxy_Compatibility_Guide.md` | 支持的 129+ OpenAI 兼容后端清单（**LTB 同样适用**） |
 | `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
 | `LingoFuse_LLM_Service_Work_Summary.md` | LLM 工具链版本演进与架构决策（历史参考） |
 | `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
+> **重要说明**：本文档主要覆盖 `llm_proxy.exe` 的参数。`llm_proxy_tool.exe`（LTB）的**完整参数**以 `llm_proxy_tool.py --help`（或 `llm_proxy_tool.exe --help`）为权威来源。本文档第五章 5.6 节与第八章 8.2 节仅列出**常用项**，如遇疑问请以 `--help` 输出为准。
+
 ---
 
-**文档版本**：V3.0（仅保留同目录链接，高对比配色）  
+**文档版本**：V3.1（补入 LTB 参数段与共场景，明确 LTB 与 llm_proxy 的关系，环境变量段重组）  
 **维护者**：LingoFuse-pasAgent 团队  
 **反馈**：问题提 Issue，急事加 Q（600585）

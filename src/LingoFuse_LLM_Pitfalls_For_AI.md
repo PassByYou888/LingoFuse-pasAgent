@@ -1,10 +1,10 @@
-# LingoFuse LLM Pitfalls For AI（v3.0）
+# LingoFuse LLM Pitfalls For AI（v3.1）
 
 > **文件路径**：`LingoFuse_LLM_Pitfalls_For_AI.md`  
 > **目标读者**：**AI 助手**  
 > **用途**：接手本项目时，快速避坑  
 > **覆盖范围**：服务端 / 代理层 / 客户端 / 协议 / 跨语言 / GUI  
-> **版本**：v3.0（2026-09-14）—— 更新为高对比配色，仅保留同目录链接  
+> **版本**：v3.1（2026-09-14）  
 > **相关文档**（同目录）：
 > - 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
 > - 服务端命令行手册：`LingoFuse_LLM_Service_CLI_guide.md`
@@ -13,13 +13,24 @@
 > - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
 > - llama-cpp-python 安装：`llama_cpp_python_guide.md`
 
+**本次更新（v3.1）** 修正内容：
+- 第三节新增 **P7 系列**（LTB 专项坑）：P7-1 工具不执行、P7-2 与 `mcp_api_tool` 冲突、P7-3 预连接顺序、P7-4 `tool_calls` 参数为空、P7-5 多轮循环未终止。此前 v3.0 在「症状速查表」中引用了 P7-*，但正文未定义，属于 dangling reference。
+- 第三节 P6-3 的标题由「`set_system_message` 在代理中必须显式返回 unsupported」明确为「**`llm_proxy` / `llm_proxy_tool` 中的 `set_system_message` 必须显式返回 unsupported**」，与 v1.8 实际行为对齐。
+- 第一节踩坑地图新增 LTB 相关分支，避免读者只看到客户端/服务端两类坑。
+- 第七节 P4-2 中「先优雅关闭客户端，再 Shutdown」的顺序补充 `LLM.Disconnect` 内部行为说明（`ExitMainThread` + `FreeApp`）。
+- 第八节 P5-1 递归坑，补充「为什么用循环替代递归」的说明。
+- 第九节「坑的优先级矩阵」补入 P7 系列（LTB 相关）。
+- 第十节「AI 检索速查表」补齐 P7 系列条目。
+- 第十一节「跨语言一致性检查清单」新增「LTB 相关检查」分支。
+- 明确本仓库 / 核心仓库归属：`llm_client.pas`、`llm_tool_frm.pas` 属于 **LingoFuse 核心仓库**。
+
 ---
 
 ## 零、阅读指南
 
 本文档**不解释原理**，只列**踩过的坑 + 正确做法**。  
 每条坑格式：**症状 → 根因 → 正确做法**。  
-AI 检索时可直接搜关键词（如 `client_name`、`var/out`、`Streaming stall`）。
+AI 检索时可直接搜关键词（如 `client_name`、`var/out`、`Streaming stall`、`max_tool_rounds`）。
 
 **优先级标识**：
 
@@ -27,11 +38,11 @@ AI 检索时可直接搜关键词（如 `client_name`、`var/out`、`Streaming s
 - 🟠 **严重**：逻辑错误 / 静默失败
 - 🟡 **一般**：体验 / 可维护性
 
-**版本变化（v3.0 新增）**：
+**仓库归属说明**：
 
-- 全文档图表改为高对比配色
-- 相关文档链接改为同目录相对路径
-- 与新版生态体系使用指南对齐
+- 本文档中提到的 **Pascal GUI 客户端**（`llm_client.pas`、`llm_tool_frm.pas`、`llm_tool_frm.lfm`）属于 **LingoFuse 核心仓库**（[github.com/PassByYou888/LingoFuse](https://github.com/PassByYou888/LingoFuse)），**不在本仓库**（`LingoFuse-pasAgent`）。
+- 本仓库包含：Python 组件（`llm_*.py`）、MCP 网关（`mcp_api_tool.py`）、LTB（`llm_proxy_tool.py`）、Pascal 服务端示例（`pascal_agent_*.lpr`）。
+- 读者若在 `src/` 下找不到 `llm_client.pas` 等文件，请到核心仓库查找。
 
 ---
 
@@ -44,6 +55,7 @@ flowchart TB
     ROOT --> A["🟦 LingoFuse 框架坑"]
     ROOT --> B["🟩 Python 服务端坑"]
     ROOT --> P["🟪 llm_proxy 传输坑"]
+    ROOT --> L["🔴 LTB 服务端工具执行坑"]
     ROOT --> C["🟫 Pascal 客户端坑"]
     ROOT --> D["🟧 跨语言协议坑"]
     ROOT --> E["🟥 GUI 集成坑"]
@@ -67,6 +79,12 @@ flowchart TB
     P --> P5["Accept-Encoding: identity"]
     P --> P6["reasoning vs content 混淆"]
 
+    L --> L1["LTB 工具不执行"]
+    L --> L2["与 mcp_api_tool reg_agent 冲突"]
+    L --> L3["预连接 middleware 顺序"]
+    L --> L4["tool_calls 参数为空 {}"]
+    L --> L5["多轮循环未终止"]
+
     C --> C1["var/out 同签名"]
     C --> C2["事件签名对齐"]
     C --> C3["Connect 部分失败"]
@@ -85,9 +103,10 @@ flowchart TB
     style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style B fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
     style P fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
+    style L fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style C fill:#7B241C,stroke:#4A1108,stroke-width:3px,color:#FFFFFF
     style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
-    style E fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style E fill:#C0392B,stroke:#641E16,stroke-width:3px,color:#FFFFFF
 ```
 
 ---
@@ -295,6 +314,8 @@ def main():
         service.stop()
 ```
 
+> **注意**：`llm_proxy_tool.py`（LTB）的 `main()` 与 `llm_proxy.py` 采用同样的模式，此处同样适用。
+
 **AI 检索关键词**：`llm_proxy exit`、`SIGINT`、`main loop`、`atexit`、`_SHUTDOWN`。
 
 ---
@@ -386,7 +407,7 @@ conn.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
 ---
 
-### P6-3. **`set_system_message` 在代理中必须显式返回 unsupported**
+### P6-3. **`llm_proxy` / `llm_proxy_tool` 中的 `set_system_message` 必须显式返回 unsupported**
 
 **症状**：
 
@@ -428,7 +449,7 @@ def _handle_set_system_message(self, data):
 **客户端必须准备接受失败**：
 
 ```pascal
-// ✅ 温和处理失败
+// ✅ 温和处理失败（Pascal 客户端，位于 LingoFuse 核心仓库）
 if not LLM.SetSystemMessage(new_sys, err) then
 begin
   DoStatus('更新系统消息失败: ' + err);
@@ -436,6 +457,8 @@ begin
   Exit;
 end;
 ```
+
+> **`llm_proxy_tool.py`（LTB）同样是无状态转发器**，其 `set_system_message` 行为与 `llm_proxy.py` 一致——**明确返回 `unsupported`**。
 
 **AI 检索关键词**：`set_system_message`、`unsupported`、`stateless`、`llm_proxy`。
 
@@ -474,7 +497,217 @@ end;
 
 ---
 
-## 四、🟠 Python 服务端坑
+## 四、🔴 LTB 专项坑（llm_proxy_tool）
+
+> LTB（LLM Tool Bridge，即 `llm_proxy_tool.py`）是路径 B 的服务端，负责在服务端代管 MCP 工具调用。它引入了一批**专属**的坑，与 `llm_proxy.py` 完全不同。
+
+### P7-1. **LTB 启动了但工具不执行**
+
+**症状**：
+
+- `llm_proxy_tool.exe` 正常启动，`Server 'LLM_Service' running on ipc:llm_service` 打印成功
+- 客户端调用 `generate` 也能收到流式回复
+- 但模型明明在回复里说"我要调用 add 工具"，实际上工具**根本没被执行**
+- 后端日志看不到任何 `tool_calls` 相关记录
+
+**根因**（四种可能，逐项排查）：
+
+1. **`--enable-tools` 被关闭**：默认是启用，但若用户显式传了 `--no-tools`，LTB 会退化为纯文本代理，不会注入 `tools` 参数，后端自然不会返回 `tool_calls`。
+2. **`language_middleware` 未安装或导入失败**：`try/except ImportError` 静默降级，启动时只打印 WARNING，容易被忽略。
+3. **信标 (`pascal_agent_service.exe`) 未启动**：LTB 无法连接到 `ipc:agent`，工具列表为空，自动降级为纯文本模式。
+4. **工具提供者 (`pascal_agent_api.exe`) 未启动**：信标在线，但没有任何工具注册，工具列表为空，同样降级。
+
+**正确做法**：
+
+1. 确认启动命令**没有** `--no-tools`。
+2. 启动时观察日志：
+   ```
+   [INFO] MCP middleware ready: 8 tool(s) cached
+   ```
+   **看到 `8 tool(s) cached` 才说明工具加载成功**。若显示 `0 tool(s)` 或 `pre-connect did not yield any tools`，说明信标或工具提供者未就绪。
+3. 按顺序启动：**信标 → 工具提供者 → LTB**。LTB 支持信标后启动，但**工具提供者必须先于 LTB 启动**（因为 LTB 在 `Server.start()` 之前预连接 middleware 并拉取工具列表；拉取后不再刷新）。
+4. 若工具提供者是动态上下线的，需**重启 LTB** 才能感知工具变化（LTB 当前版本不支持运行时刷新工具列表）。
+
+**AI 检索关键词**：`LTB`、`--enable-tools`、`--no-tools`、`language_middleware`、`tool(s) cached`、`信标未启动`。
+
+---
+
+### P7-2. **LTB 与 mcp_api_tool 同时启动冲突**
+
+**症状**：
+
+- 路径 A 和路径 B 想同时跑（LM Studio 走 A，Pascal GUI 走 B）
+- 二者**只有一方能正常从信标拉取工具**，另一方始终拿到 0 个工具
+- 日志里出现类似 `application mismatch` 或 `reg_agent already occupied`
+
+**根因**：  
+`mcp_api_tool.exe` 与 `llm_proxy_tool.exe` 都需要在信标上注册一个"注册代理应用"来拉取工具列表。**默认情况下二者使用同一个 `reg_agent` 名字**：
+
+- `mcp_api_tool.exe`：`--reg-agent-app reg_agent`（默认）
+- `llm_proxy_tool.exe`：`--mcp-reg-agent-app llm_proxy_agent`（**已经不同**）
+
+但是，**如果你修改过任意一方的默认值，或复制过启动命令**，很容易把两者改成相同名字。一旦相同，信标无法区分是哪个客户端在请求，导致工具拉取错乱。
+
+**正确做法**：
+
+1. **保持默认**：`mcp_api_tool` 用 `reg_agent`，`llm_proxy_tool` 用 `llm_proxy_agent`。**不要修改**。
+2. 若确实需要自定义，确保二者**永不相等**。
+3. 启动日志里应分别看到：
+   ```
+   [mcp_api_tool] Registered tool: add ...
+   [llm_proxy_tool] MCP middleware ready: 8 tool(s) cached
+   ```
+   二者独立工作，互不干扰。
+
+**AI 检索关键词**：`reg_agent`、`llm_proxy_agent`、`application mismatch`、`共存`。
+
+---
+
+### P7-3. **LTB 启动时报 `LF_PrepareDone returned 0`，工具缓存永久失效**
+
+**症状**：
+
+- LTB 启动时打印：
+  ```
+  [LanguageMiddleware] Connection failed: LF_PrepareDone failed
+  [LanguageMiddleware] Failed to initialize MCP tools
+  [WARNING] MCP middleware pre-connect did not yield any tools
+  ```
+- 之后**无论怎么重试都不会恢复**，即使信标、工具提供者都在线
+- 客户端收到的 `generate` 响应中永远没有 `tool_calls`
+
+**根因**：  
+LingoFuse 的 `LF_PrepareDone()` 是**一次性**的：**同一个进程内，只有第一次调用会返回 1**，之后**永远返回 0**。
+
+- `Server.start()` 内部会调用 `LF_PrepareDone()` 来启动模拟主线程。
+- `language_middleware._connect()` 也会调用 `LF_PrepareDone()`。
+
+如果 `Server.start()` **先执行**，主线程已启动，`language_middleware._connect()` 后续调用 `LF_PrepareDone()` 会返回 0，`_connect()` 将其视为**硬失败**，**永久禁用工具缓存**。
+
+**正确做法**：
+
+LTB 必须在 `Server.start()` **之前**预连接 middleware：
+
+```python
+# start() 顺序（关键）
+self.resolve_model()
+
+# ---- CRITICAL: pre-connect MCP middleware BEFORE Server.start() ----
+if CONFIG.enable_tools and _HAS_MIDDLEWARE:
+    ok = self._ensure_tools_ready()   # 先赢这场竞争
+
+threading.Thread(target=self._watchdog_loop, ...).start()
+self.server.start(CONFIG.endpoint)    # Server.start() 检测到主线程已活动，走 Warning 分支
+```
+
+源码 `llm_proxy_tool.py` 的 `LLMProxyToolService.start()` 已按此顺序实现。**若你改动过此处，务必保持顺序**。
+
+**AI 检索关键词**：`LF_PrepareDone returned 0`、`pre-connect`、`Server.start`、`middleware`、`一次性`。
+
+---
+
+### P7-4. **LTB 收到的 `tool_calls` 参数为空 `{}`**
+
+**症状**：
+
+- 后端（LM Studio / DeepSeek）返回了 `tool_calls`
+- LTB 内部日志显示 `tool_calls` 解析出来了，但 `arguments` 字段是空字符串
+- 进一步 `json.loads("")` 得到 `{}`，工具被以空参数调用
+- Pascal 端收到 `args={}` 后想用 `a`、`b` 等字段，抛异常
+
+**根因**：  
+OpenAI SSE 流式协议中，`tool_calls` 是**分片到达**的：
+
+```json
+{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "add"}}]}}
+{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "{\"a\":"}}]}}
+{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "5,\"b\":"}}]}}
+{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "3}"}}]}}
+```
+
+如果实现时**不按 `index` 聚合**，或**不把 `arguments` 当字符串拼接**（而是试图每次都 `json.loads`），就会得到空或不完整的参数。
+
+**正确做法**：
+
+`llm_proxy_tool.py` 的 `OpenAIStreamClient.stream_chat` 已实现按 `index` 聚合的**累加器**：
+
+```python
+# ✅ 按 index 累加 arguments 字符串
+tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+for delta in ...:
+    if "tool_calls" in delta:
+        for tc in delta["tool_calls"]:
+            idx = tc.get("index", 0)
+            if idx not in tool_calls_acc:
+                tool_calls_acc[idx] = {
+                    "id": "",
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                }
+            if tc.get("id"):
+                tool_calls_acc[idx]["id"] = tc["id"]
+            fn = tc.get("function") or {}
+            if fn.get("name"):
+                tool_calls_acc[idx]["function"]["name"] = fn["name"]
+            if fn.get("arguments"):
+                tool_calls_acc[idx]["function"]["arguments"] += fn["arguments"]  # ← 字符串拼接
+```
+
+流结束后统一 `yield {"tool_calls": ordered}`，此时每个 `arguments` 才是完整 JSON 字符串。
+
+**AI 检索关键词**：`tool_calls`、`arguments`、`分片`、`index`、`SSE 聚合`、`空 {}`。
+
+---
+
+### P7-5. **LTB 多轮 tool_calls 循环未终止**
+
+**症状**：
+
+- 客户端发起一次 `generate`，LTB 内部陷入无限循环，不断向后端请求
+- 后端日志疯狂刷新，每次都是 `tool_calls`，从不停歇
+- 客户端一直收不到 `finish` 事件，界面卡死
+
+**根因**：  
+Reasoning 模型（尤其是能力不足时）可能**连续调用工具几十次**而不产出最终文本。如果 LTB 没有**轮次上限**，循环就永远不会终止。
+
+**正确做法**：
+
+LTB 内置**多重上限**：
+
+1. **轮次上限**：`--max-tool-rounds`（默认 100）。达到后强制进入最终文本轮。
+2. **总调用数上限**：`--max-total-tool-calls`（默认 50）。达到后立即切换到最终文本轮。
+3. **单轮工具数上限**：`--max-tools-per-round`（默认 10）。防止单轮批量 tool_calls 爆炸。
+4. **最后一轮不带 tools**：`is_final_round` 判定后，`round_options.pop("tools")`，强制模型产出文本。
+5. **结果长度截断**：`--max-tool-result-chars` / `--max-total-tool-result-chars`，防止消息历史被工具结果撑爆。
+
+关键代码：
+
+```python
+is_final_round = (
+    force_final_round
+    or round_idx == CONFIG.max_tool_rounds - 1
+)
+
+if tools_available and not is_final_round:
+    round_options["tools"] = self._openai_tools_cache
+else:
+    round_options.pop("tools", None)
+    round_options.pop("tool_choice", None)
+```
+
+**若需放宽限制**（例如模型确实需要长工具链）：
+
+```powershell
+.\llm_proxy_tool.exe --max-tool-rounds 200 --max-total-tool-calls 100
+```
+
+**但不要设得太大**，否则失控模型会让 LTB 陷入长时间等待。
+
+**AI 检索关键词**：`max_tool_rounds`、`max_total_tool_calls`、`无限循环`、`最后一轮不带 tools`、`终止`。
+
+---
+
+## 五、🟠 Python 服务端坑
 
 ### P1-1. **Chat template 搜索路径与脚本位置不一致**
 
@@ -487,15 +720,14 @@ end;
 最初代码只在**脚本同目录**找模板。但实际布局是：
 
 ```
-Py/
+src/
 ├── chat_template.jinja     ← 模板在这里
-└── llm-service/
-    └── llm_service.py      ← 脚本在这里
+└── llm_service.py          ← 脚本也在这里
 ```
 
-`os.path.dirname(__file__)` = `.../llm-service`，模板不在那儿。
+> **注**：v3.3 起，`llm_service.py` **不再搜索目录**，只有显式 `--chat-template` 才加载模板文件。本坑主要针对 v3.2 及之前的版本，或用户自定义了搜索逻辑的情况。
 
-**正确做法**：
+**正确做法**（v3.2 及之前的多路径搜索思路，供参考）：
 
 ```python
 # ✅ 多路径搜索
@@ -504,6 +736,12 @@ SEARCH_DIRS = (
     os.path.abspath(os.path.join(_SCRIPT_DIR, "..")),  # 父目录
     os.getcwd(),                            # 当前工作目录
 )
+```
+
+**v3.3 及之后的正确做法**：显式指定模板路径，否则使用模型内置模板：
+
+```bash
+python llm_service.py --chat-template ./chat_template.jinja
 ```
 
 **AI 检索关键词**：`chat_template.jinja`、`template not found`、`LoadTemplate`、`__file__`。
@@ -695,7 +933,7 @@ end;
 
 ---
 
-## 五、🟡 编码相关坑
+## 六、🟡 编码相关坑
 
 ### P2-1. **JSON 经 `string` 中转导致中文乱码**
 
@@ -810,7 +1048,7 @@ _setup_console_encoding()
 
 ---
 
-## 六、🟠 多会话 / 生命周期坑
+## 七、🟠 多会话 / 生命周期坑
 
 ### P3-1. **Watchdog 误杀正在生成的会话**
 
@@ -888,7 +1126,9 @@ end;
 
 ---
 
-## 七、🟡 GUI 集成坑
+## 八、🟡 GUI 集成坑
+
+> 以下坑主要针对 **Pascal GUI 客户端**（`llm_client.pas` / `llm_tool_frm.pas`），源码位于 **LingoFuse 核心仓库**，本仓库不含其源码。
 
 ### P4-1. **后台线程直接读 UI 控件**
 
@@ -937,6 +1177,11 @@ begin
 end;
 ```
 
+`LF_Shutdown` 会强制清理 LingoFuse 的所有资源，但**不经过 `TLLMClient.Disconnect` 的优雅关闭路径**，导致：
+- LingoFuse 主线程被强制终止（`LF_ExitMainThread` 未调用）
+- `FApp` 未被 `LF_FreeApp` 分离
+- 回调可能仍在执行 → 访问已释放的 Form
+
 **正确做法**：
 
 ```pascal
@@ -946,14 +1191,21 @@ begin
   CloseAction := caFree;
   if LLM <> nil then
   begin
-    LLM.Disconnect;              // 内部 ExitMainThread + FreeApp
+    LLM.Disconnect;              // 内部：ExitMainThread + FreeApp
     disposeObjectAndNil(LLM);
   end;
-  LF_Shutdown;
+  LF_Shutdown;                    // 最后才做全局清理
 end;
 ```
 
-**AI 检索关键词**：`FormClose`、`LF_Shutdown`、`Disconnect`、关闭顺序。
+`LLM.Disconnect` 内部会：
+1. 调用 `LF_ExitMainThread`（停止模拟主线程）
+2. 调用 `LF_FreeApp(FApp)`（分离应用）
+3. 重置 `FConnected` / `FPrepared` 状态
+
+顺序不能反。**反了会崩溃**。
+
+**AI 检索关键词**：`FormClose`、`LF_Shutdown`、`Disconnect`、关闭顺序、`ExitMainThread`。
 
 ---
 
@@ -1149,7 +1401,7 @@ end;
 
 ---
 
-## 八、🟡 递归 / 边界坑
+## 九、🟡 递归 / 边界坑
 
 ### P5-1. **递归追加输出可能栈溢出**
 
@@ -1169,10 +1421,12 @@ begin
 end;
 ```
 
+一个 chunk 里的换行数量取决于模型输出，理论上无上限。若 chunk 含 10,000 个换行，就会递归 10,000 层，直接撑爆栈。
+
 **正确做法**：
 
 ```pascal
-// ✅ 改循环
+// ✅ 改循环：无论多少换行，栈深度始终为 1
 procedure AppendChunk(const Text: string);
 var
   p: integer;
@@ -1193,6 +1447,8 @@ begin
   end;
 end;
 ```
+
+**关键认知**：**能用循环的地方绝不用递归**——尤其是输入长度不受控的场景。
 
 **AI 检索关键词**：`递归`、`栈溢出`、`stack overflow`、`AppendChunk`。
 
@@ -1235,7 +1491,7 @@ end;
 
 ---
 
-## 九、坑的优先级矩阵
+## 十、坑的优先级矩阵
 
 ```mermaid
 quadrantChart
@@ -1251,6 +1507,10 @@ quadrantChart
     回调中阻塞: [0.60, 0.90]
     SSE缓冲: [0.85, 0.95]
     proxy进程退出: [0.75, 0.90]
+    LTB工具不执行: [0.80, 0.90]
+    LTB_preconnect顺序: [0.70, 0.95]
+    LTB_tool_calls空: [0.75, 0.85]
+    LTB多轮循环: [0.65, 0.90]
     thinking混淆: [0.80, 0.75]
     gzip压缩: [0.65, 0.90]
     set_system_message: [0.70, 0.80]
@@ -1268,7 +1528,7 @@ quadrantChart
 
 ---
 
-## 十、AI 检索速查表
+## 十一、AI 检索速查表
 
 | 症状关键词 | 对应坑 |
 |-----------|--------|
@@ -1302,10 +1562,15 @@ quadrantChart
 | **gzip / 压缩 / Accept-Encoding** | **P6-1 identity header** |
 | **40ms 抖动** | **P6-2 TCP_NODELAY** |
 | **多会话串台** | **P6-4 FActiveSessionId** |
+| **LTB 启动了但工具不执行** | **P7-1 --enable-tools / 信标未启动** |
+| **LTB 与 mcp_api_tool 冲突** | **P7-2 reg_agent 名字相同** |
+| **LTB 报 `LF_PrepareDone returned 0`** | **P7-3 预连接顺序** |
+| **LTB 收到的 `tool_calls` 参数为空 `{}`** | **P7-4 SSE 分片未按 index 聚合** |
+| **LTB 多轮循环不终止** | **P7-5 多重上限未配置** |
 
 ---
 
-## 十一、跨语言一致性检查清单
+## 十二、跨语言一致性检查清单
 
 写完任一语言的客户端，**上线前必查**：
 
@@ -1327,7 +1592,11 @@ flowchart TB
     C7 -->|否| F7["❌ 修改"]
     C7 -->|是| C8{"set_system_message<br/>失败有兜底?"}
     C8 -->|否| F8["❌ 修改"]
-    C8 -->|是| PASS["✅ 通过"]
+    C8 -->|是| C9{"（路径 B）LTB<br/>reg_agent 是否独立?"}
+    C9 -->|否| F9["❌ 修改"]
+    C9 -->|是| C10{"（路径 B）信标 + <br/>工具提供者已先启动?"}
+    C10 -->|否| F10["❌ 修改"]
+    C10 -->|是| PASS["✅ 通过"]
 
     style PASS fill:#1E8449,stroke:#0E4D2A,stroke-width:4px,color:#FFFFFF
     style F1 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
@@ -1338,6 +1607,8 @@ flowchart TB
     style F6 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style F7 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style F8 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style F9 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style F10 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
     style START fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style C1 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
     style C2 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
@@ -1347,11 +1618,13 @@ flowchart TB
     style C6 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
     style C7 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
     style C8 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C9 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
+    style C10 fill:#B7791F,stroke:#7E5109,stroke-width:2px,color:#FFFFFF
 ```
 
 ---
 
-## 十二、三条铁律
+## 十三、三条铁律
 
 ```mermaid
 mindmap
@@ -1378,7 +1651,7 @@ mindmap
 
 ---
 
-## 十三、llm_proxy 是翻译器，不是替代品
+## 十四、llm_proxy 是翻译器，不是替代品
 
 ```mermaid
 flowchart LR
@@ -1398,10 +1671,11 @@ flowchart LR
 - 它**无状态**：每个请求的 messages 数组由代理层重建，历史记录由客户端持有
 - 它**不做策略**：流里有什么就转发什么，包括 `reasoning_content`（thinking）
 - 它**不支持** `set_system_message`（无状态语义下无法实现）
+- `llm_proxy_tool`（LTB）在 `llm_proxy` 之上**增加服务端工具执行**，其余语义完全一致
 
 ---
 
-## 十四、AI 接手建议
+## 十五、AI 接手建议
 
 如果你是**第一次接手本项目**，按以下顺序读代码：
 
@@ -1409,15 +1683,15 @@ flowchart LR
 flowchart LR
     R1["1. 本文档"] --> R2["2. llm_service.py<br/>看 worker 线程模型"]
     R2 --> R3["3. llm_proxy.py<br/>看传输层与无状态语义"]
-    R3 --> R4["4. llm_test.py<br/>看客户端交互模式"]
-    R4 --> R5["5. Pascal 客户端<br/>看跨语言对齐"]
-    R5 --> R6["6. GUI 窗体<br/>看 GUI 集成"]
+    R3 --> R4["4. llm_proxy_tool.py<br/>看 LTB 工具循环"]
+    R4 --> R5["5. llm_test.py<br/>看客户端交互模式"]
+    R5 --> R6["6. Pascal 客户端<br/>看跨语言对齐"]
 
     style R1 fill:#922B21,stroke:#5A1A14,stroke-width:4px,color:#FFFFFF
     style R2 fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
     style R3 fill:#5B2C6F,stroke:#321640,stroke-width:3px,color:#FFFFFF
-    style R4 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
-    style R5 fill:#7B241C,stroke:#4A1108,stroke-width:3px,color:#FFFFFF
+    style R4 fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style R5 fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
     style R6 fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
 ```
 
@@ -1427,9 +1701,11 @@ flowchart LR
 2. `llm_service.py` 的 `_emit_message` / `_send_payload`（协议出口）
 3. `llm_proxy.py` 的 `OpenAIStreamClient.stream_chat`（http.client 流式读取）
 4. `llm_proxy.py` 的 `_handle_set_system_message`（明确拒绝而非静默失败）
-5. Pascal 客户端的 `OnLLMStream`（协议入口）
-6. Pascal 客户端的 `CleanupPartialConnect`（资源安全）
-7. GUI 窗体的 `new_session_ButtonClick`（system prompt 生效入口）
+5. `llm_proxy_tool.py` 的 `LLMProxyToolService.start()`（预连接 middleware 顺序）
+6. `llm_proxy_tool.py` 的 `_run_generation`（多轮 tool_calls 循环与上限）
+7. Pascal 客户端的 `OnLLMStream`（协议入口）
+8. Pascal 客户端的 `CleanupPartialConnect`（资源安全）
+9. GUI 窗体的 `new_session_ButtonClick`（system prompt 生效入口）
 
 **不要碰**（除非明确要改）：
 
@@ -1438,17 +1714,19 @@ flowchart LR
 - `TBytes` 编码路径
 - `http.client` 流式读取循环
 - `Accept-Encoding: identity` 与 `TCP_NODELAY`
+- `LLMProxyToolService.start()` 中预连接 middleware 的**顺序**
 
 **关键认知**：
 
-- `llm_service.py` 与 `llm_proxy.py` 是**兄弟**关系，不是协作关系
-- 二者共享 Call API 面，只有 `set_system_message` 行为不同
-- 二者使用**同一个** `ipc:llm_service` 端点，**只能同时运行一个**
-- 二者都是 LingoFuse 服务端，客户端不需要任何代码改动就能切换
+- `llm_service.py` / `llm_proxy.py` / `llm_proxy_tool.py` 是**兄弟**关系，不是协作关系
+- 三者共享 Call API 面，只有 `set_system_message` 行为不同（service=支持，另两者=明确拒绝）
+- 三者使用**同一个** `ipc:llm_service` 端点，**只能同时运行一个**
+- 三者都是 LingoFuse 服务端，客户端不需要任何代码改动就能切换
+- `llm_proxy_tool.py` 与 `mcp_api_tool.py` **可以同时运行**（不同 `reg_agent` 名）
 
 ---
 
-## 十五、相关文档（同目录）
+## 十六、相关文档（同目录）
 
 | 文档 | 说明 |
 |------|------|
@@ -1459,8 +1737,10 @@ flowchart LR
 | `LingoFuse_LLM_Service_Work_Summary.md` | LLM 工具链版本演进与架构决策（历史参考） |
 | `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
 
+> **归属提醒**：`llm_client.pas`、`llm_tool_frm.pas` 等 **Pascal GUI 客户端源码**属于 **LingoFuse 核心仓库**（[github.com/PassByYou888/LingoFuse](https://github.com/PassByYou888/LingoFuse)），不在本仓库中。
+
 ---
 
 **文档完成**
 
-*本踩坑总结面向 AI，通过症状-根因-正确做法的结构化形式，让后续 AI 助手能快速定位和避免已知陷阱。v3.0 在 v2.0 基础上更新为高对比配色，相关文档链接改为同目录相对路径，与新版生态体系使用指南对齐。*
+*v3.1 在 v3.0 基础上新增 P7 系列（LTB 专项坑），补齐速查表与检查清单中此前 dangling 的 P7-* 引用；明确本仓库 / 核心仓库归属；完善 P6-3 / P4-2 的行为说明。所有图表使用 Mermaid 绘制，采用高对比配色方案。*

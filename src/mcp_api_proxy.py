@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-mcp_proxy.py - Transparent stdio forwarder for MCP debugging (v2.5)
+mcp_api_proxy.py - Transparent stdio forwarder for MCP debugging (v2.5)
 
 Usage:
-    python mcp_proxy.py <real_command> [args...]
+    python mcp_api_proxy.py <real_command> [args...]
 Example:
-    python mcp_proxy.py python mcp_server.py --transport stdio
+    python mcp_api_proxy.py python mcp_api_tool.py --transport stdio
 
 The proxy launches the real command as a child process and forwards stdin,
 stdout and stderr between the MCP client and the child. Every block of data
@@ -25,7 +25,7 @@ CHANGELOG (v2.5)
 CHANGELOG (v2.4)
     * `_script_dir()` now uses `_is_frozen()`, which checks both
       `sys.frozen` and `sys._MEIPASS` (PyInstaller one-file mode).
-      This matches the frozen detection used by mcp_server.py.
+      This matches the frozen detection used by mcp_api_tool.py.
     * Added `_setup_console()` to force UTF-8 encoding for stdout and
       stderr on Windows. Without this, log lines containing non-ASCII
       characters (e.g. Windows paths with Chinese characters) could be
@@ -94,7 +94,7 @@ def _is_frozen() -> bool:
     """
     Return True if the process is running from a frozen executable
     (PyInstaller one-dir or one-file, or Nuitka). Matches the logic
-    used by mcp_server.py.
+    used by mcp_api_tool.py.
     """
     return getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS')
 
@@ -243,7 +243,7 @@ def pipe_reader(source, target, direction: str, json_filter: bool = False) -> No
 
 def main() -> None:
     if len(sys.argv) < 2:
-        log("Usage: mcp_proxy.py <command> [args...]")
+        log("Usage: mcp_api_proxy.py <command> [args...]")
         sys.exit(1)
 
     real_cmd = sys.argv[1:]
@@ -271,7 +271,7 @@ def main() -> None:
         args=(sys.stdin.buffer, proc.stdin, "LM->Server", False),
         daemon=True,
     )
-    # Server->LM: mcp_server stdout, contains JSON-RPC plus C-level
+    # Server->LM: mcp_api_tool stdout, contains JSON-RPC plus C-level
     # pollution from the LingoFuse native library. Enable filter.
     t2 = threading.Thread(
         target=pipe_reader,

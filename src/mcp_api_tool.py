@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-mcp_server.py - MCP Server for LingoFuse Backend (v2.42)
+mcp_api_tool.py - MCP Server for LingoFuse Backend (v2.42)
 
 DESCRIPTION
     MCP gateway between MCP clients and a LingoFuse backend.
@@ -39,10 +39,10 @@ CHANGELOG (v2.38)
       Quiet=True).
 
 USAGE EXAMPLES
-    python mcp_server.py
-    python mcp_server.py --transport http --host 0.0.0.0 --port 8000
-    python mcp_server.py --log-file ./mcp_server.log
-    python mcp_server.py --generate-configs --output-dir ./my_configs
+    python mcp_api_tool.py
+    python mcp_api_tool.py --transport http --host 0.0.0.0 --port 8000
+    python mcp_api_tool.py --log-file ./mcp_api_tool.log
+    python mcp_api_tool.py --generate-configs --output-dir ./my_configs
 
 DEPENDENCIES
     - fastmcp (>= 0.2.0) and pydantic
@@ -148,7 +148,7 @@ def _server_dir() -> str:
 
 def get_default_proxy_path() -> Optional[str]:
     server_dir = _server_dir()
-    candidates = ["mcp_proxy.exe"] if is_frozen_exe() else ["mcp_proxy.py"]
+    candidates = ["mcp_api_proxy.exe"] if is_frozen_exe() else ["mcp_api_proxy.py"]
     for name in candidates:
         p = os.path.join(server_dir, name)
         if os.path.isfile(p):
@@ -172,7 +172,7 @@ _LOGGER: Optional[logging.Logger] = None
 
 def _init_logger():
     global _LOGGER
-    _LOGGER = logging.getLogger("mcp_server")
+    _LOGGER = logging.getLogger("mcp_api_tool")
     _LOGGER.handlers.clear()
     if LOG_FILE:
         log_dir = os.path.dirname(LOG_FILE)
@@ -278,7 +278,7 @@ def _ensure_language_middleware_loaded():
         # error via log_error. We use stderr directly here to avoid
         # depending on _LOGGER, which may not yet be initialized.
         sys.stderr.write(
-            f"[mcp_server] Failed to import language_middleware: {e}\n"
+            f"[mcp_api_tool] Failed to import language_middleware: {e}\n"
         )
         sys.stderr.flush()
 
@@ -741,7 +741,7 @@ Environment variables (read once at startup):
   MCP_LOG_FILE                    - Log file path
   MCP_DEBUG                       - Enable debug mode (default: {})
   MCP_SHOW_BANNER                 - Show FastMCP banner (default: {})
-  MCP_PROXY_PATH                  - Path to mcp_proxy (auto-detected if empty)
+  MCP_API_PROXY_PATH                  - Path to mcp_api_proxy (auto-detected if empty)
         """.format(
             DEFAULT_ENDPOINT, DEFAULT_TIMEOUT_MS,
             DEFAULT_TRANSPORT, DEFAULT_HOST, DEFAULT_PORT,
@@ -825,10 +825,10 @@ Environment variables (read once at startup):
     )
     parser.add_argument(
         "--proxy-path",
-        default=os.environ.get("MCP_PROXY_PATH", DEFAULT_PROXY_PATH),
-        help="Explicit path to mcp_proxy (script or exe). "
-             "If not specified, the generator auto-detects it next to mcp_server "
-             "(mcp_proxy.py in script mode, mcp_proxy.exe in frozen mode)."
+        default=os.environ.get("MCP_API_PROXY_PATH", DEFAULT_PROXY_PATH),
+        help="Explicit path to mcp_api_proxy (script or exe). "
+             "If not specified, the generator auto-detects it next to mcp_api_tool "
+             "(mcp_api_proxy.py in script mode, mcp_api_proxy.exe in frozen mode)."
     )
     return parser.parse_args()
 
@@ -870,17 +870,17 @@ def main():
         if not proxy_path:
             proxy_path = get_default_proxy_path()
             if proxy_path:
-                log_info(f"Auto-detected mcp_proxy: {proxy_path}")
+                log_info(f"Auto-detected mcp_api_proxy: {proxy_path}")
             else:
-                expected = "mcp_proxy.exe" if frozen else "mcp_proxy.py"
+                expected = "mcp_api_proxy.exe" if frozen else "mcp_api_proxy.py"
                 log_warning(
-                    f"mcp_proxy not found next to mcp_server "
+                    f"mcp_api_proxy not found next to mcp_api_tool "
                     f"(expected '{expected}' in '{_server_dir()}'). "
                     "Proxy stdio configs will not be generated. "
                     "Use --proxy-path to specify it explicitly."
                 )
         else:
-            log_info(f"Using mcp_proxy from --proxy-path: {proxy_path}")
+            log_info(f"Using mcp_api_proxy from --proxy-path: {proxy_path}")
 
         generate_configs(
             server_script_path=server_path,
