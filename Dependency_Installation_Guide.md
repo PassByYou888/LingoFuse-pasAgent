@@ -5,7 +5,7 @@
 > **适用平台**：Windows / Linux / macOS  
 > **相关文档**（同目录）：
 > - 编译指南：`Build_Guide.md`
-> - MCP 新手指南：`mcp_api_tool_DOUBAO_GUIDE.md`
+> - MCP 新手指南：`mcp_api_tool_doubao_guide.md`
 > - 推荐模型：`NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md`
 > - LLM 服务命令行（子目录）：`src/LingoFuse_LLM_Service_CLI_guide.md`
 > - LLM 代理命令行（子目录）：`src/LingoFuse_LLM_Proxy_CLI_Guide.md`
@@ -22,7 +22,7 @@
 3. **想验证是否装好** → 读第七章「验证安装」。
 4. **遇到问题** → 读第八章「常见问题」。
 
-如果你只是想**运行**预编译包而不想自己编译，请直接下载预编译包并按 `mcp_api_tool_DOUBAO_GUIDE.md` 操作，**无需**阅读本文档大部分内容。
+如果你只是想**运行**预编译包而不想自己编译，请直接下载预编译包并按 `mcp_api_tool_doubao_guide.md` 操作，**无需**阅读本文档大部分内容。
 
 **本次更新（V4.0）** 修正内容：
 - 图 1「依赖层次」补入 `llm_proxy_tool.exe`（此前版本仅列出 3 个 Python 组件）。
@@ -501,7 +501,7 @@ python -c "import llama_cpp; print(f'版本: {llama_cpp.__version__}'); print(f'
 | 文档 | 说明 |
 |------|------|
 | `Build_Guide.md` | 编译指南（含更多脚本细节） |
-| `mcp_api_tool_DOUBAO_GUIDE.md` | 新手零基础教程 |
+| `mcp_api_tool_doubao_guide.md` | 新手零基础教程 |
 | `NVIDIA-Nemotron-3.5-Lightning-30B-A3B-UD-IQ4_NL.md` | 推荐模型下载与部署 |
 | `readme.md` | 项目总览与闭环架构 |
 | `code_generate_mcp.md` | 代码生成器使用手册 |
