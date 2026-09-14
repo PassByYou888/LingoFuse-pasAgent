@@ -1,8 +1,15 @@
 # LingoFuse LLM Proxy 兼容性指南
 
-> **文档版本**：V2.1  
-> **适用组件**：`llm_proxy`（脚本 / `llm_proxy.exe`）  
-> **最后更新**：2026-09-13
+> **文档版本**：V3.0  
+> **适用组件**：`llm_proxy.exe`  
+> **最后更新**：2026-09-14  
+> **相关文档**（同目录）：
+> - 生态体系使用指南：`LingoFuse_LLM_Ecosystem_User_Guide.md`
+> - 代理命令行手册：`LingoFuse_LLM_Proxy_CLI_Guide.md`
+> - 服务端命令行手册：`LingoFuse_LLM_Service_CLI_guide.md`
+> - 踩坑大全：`LingoFuse_LLM_Pitfalls_For_AI.md`
+> - 版本演进总结：`LingoFuse_LLM_Service_Work_Summary.md`
+> - llama-cpp-python 安装：`llama_cpp_python_guide.md`
 
 ---
 
@@ -10,22 +17,28 @@
 
 `llm_proxy` 的兼容性判据**极其单一**——它只认一个端点模式：`POST /v1/chat/completions` 配合 `stream=true` 返回 `text/event-stream`。任何符合此协议的服务，无论它是云 API、本地服务器、网关还是桌面应用，均可通过 `--backend-url` 无缝接入。
 
+### 图 1：兼容性判定流程
+
 ```mermaid
 flowchart LR
-    A[候选后端] --> B{提供 POST<br/>/v1/chat/completions?}
-    B -->|否| C[不支持]
-    B -->|是| D{stream=true 返回<br/>text/event-stream?}
+    A["候选后端"] --> B{"提供 POST<br/>/v1/chat/completions?"}
+    B -->|否| C["❌ 不支持"]
+    B -->|是| D{"stream=true 返回<br/>text/event-stream?"}
     D -->|否| C
-    D -->|是| E{SSE 帧为<br/>data: 带空格?}
-    E -->|否| F[需调整]
-    E -->|是| G{delta 含 content<br/>或 reasoning_content?}
+    D -->|是| E{"SSE 帧为<br/>data: 带空格?"}
+    E -->|否| F["⚠️ 需调整"]
+    E -->|是| G{"delta 含 content<br/>或 reasoning_content?"}
     G -->|否| F
-    G -->|是| H[完全兼容]
+    G -->|是| H["✅ 完全兼容"]
 
-    style A fill:#4A90E2,stroke:#1F618D,color:#fff
-    style H fill:#2ECC71,stroke:#1E8449,color:#fff
-    style C fill:#E74C3C,stroke:#922B21,color:#fff
-    style F fill:#F5A623,stroke:#B7791F,color:#fff
+    style A fill:#1A5490,stroke:#0D2F52,stroke-width:3px,color:#FFFFFF
+    style B fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style D fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style E fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style G fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style C fill:#922B21,stroke:#5A1A14,stroke-width:3px,color:#FFFFFF
+    style F fill:#B7791F,stroke:#7E5109,stroke-width:3px,color:#FFFFFF
+    style H fill:#1E8449,stroke:#0E4D2A,stroke-width:3px,color:#FFFFFF
 ```
 
 **为什么只有这一条判据？** 因为 `llm_proxy` 的实现只做三件事：解析 URL 路径提取 `app` 和 `api`、将请求体原样转发给后端、将后端的 SSE 流逐行解析并映射为 LingoFuse 的 Notify 事件。它不解析业务数据、不校验 `Content-Type`、不关心后端的具体实现。因此，**只要后端在协议层面是 OpenAI 兼容的，`llm_proxy` 就能透传它**。
@@ -42,6 +55,7 @@ flowchart LR
 | `choices[0].delta.reasoning_content` | `_extract_delta()` | 映射为 `think` 事件 |
 | `data: [DONE]` | `stream_chat()` 的 `return` | 流结束标记 |
 
+---
 
 ## 二、云 API 提供商
 
@@ -101,6 +115,7 @@ flowchart LR
 | 商汤日日新 | 有 OpenAI 兼容端点 | `/v1/chat/completions` | **OpenAI 兼容格式**，直接接入 |
 | 昆仑万维天工 | 有 OpenAI 兼容端点 | `/v1/chat/completions` | **OpenAI 兼容格式**，直接接入 |
 
+---
 
 ## 三、本地推理服务器
 
@@ -130,6 +145,7 @@ flowchart LR
 | **Dify 本地部署** | 有 OpenAI 兼容端点 | **LLMOps 平台**，OpenAI 兼容 |
 | **LLM-Proxy (Nayjest)** | 有 OpenAI 兼容端点 | **轻量代理**，OpenAI 兼容 |
 
+---
 
 ## 四、网关 / 代理 / 路由
 
@@ -158,6 +174,7 @@ flowchart LR
 | **Kong AI Gateway** | Lua | **Kong 生态**，OpenAI 兼容 |
 | **APIClaw** | — | **20 Direct Call 提供商**，OpenAI 兼容 |
 
+---
 
 ## 五、API 聚合 / 中转站
 
@@ -179,6 +196,7 @@ flowchart LR
 | **OfoxAI** | **100+ LLM 统一 OpenAI 兼容网关** |
 | **Eden AI** | **多模态聚合**，OpenAI 兼容 |
 
+---
 
 ## 六、桌面客户端（自带 OpenAI 兼容 Server）
 
@@ -202,6 +220,7 @@ flowchart LR
 | **Delta** | 离线优先 | **内置 OpenAI 兼容 API** |
 | **AI Server Studio** | 桌面 | **内置 llama.cpp + OpenAI 兼容 API** |
 
+---
 
 ## 七、嵌入 / 重排序 / TTS / STT（部分支持）
 
@@ -222,6 +241,7 @@ flowchart LR
 | **VoiceStudio** | OpenAI 兼容 TTS & STT | **OpenAI 兼容音频端点** |
 | **museq** | 23 种模态 | **OpenAI 兼容多模态** |
 
+---
 
 ## 八、启动命令速查
 
@@ -274,6 +294,7 @@ llm_proxy.exe \
 
 > **提示**：源码模式下将 `llm_proxy.exe` 替换为 `python llm_proxy.py` 即可。
 
+---
 
 ## 九、接入验证
 
@@ -294,6 +315,7 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 | delta 字段 | 含 `content` 或 `reasoning_content` | 若否则扩展 `_extract_delta` |
 | 结束标记 | `data: [DONE]` | 若缺失，后端未完整实现 SSE |
 
+---
 
 ## 十、已知限制
 
@@ -307,8 +329,23 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 | 非标准 SSE 帧 | `data:{...}` 无空格会丢帧，反代需保留原格式 |
 | 未校验 Content-Type | 后端返回非 SSE 时静默结束，客户端收到空 `finish` |
 
+---
 
 ## 十一、支持统计
+
+### 图 2：后端分布
+
+```mermaid
+pie showData
+    title llm_proxy 支持的 129+ 后端分布
+    "云 API（国际）" : 30
+    "云 API（中国区）" : 15
+    "本地推理服务器" : 20
+    "网关/代理/路由" : 20
+    "API 聚合/中转站" : 15
+    "桌面客户端（自带 Server）" : 17
+    "嵌入/TTS/STT（部分支持）" : 12
+```
 
 | 类别 | 数量 |
 |------|:----:|
@@ -320,3 +357,22 @@ curl -N -X POST http://127.0.0.1:1234/v1/chat/completions \
 | 桌面客户端（自带 Server） | 17+ |
 | 嵌入 / TTS / STT（部分支持） | 12+ |
 | **合计** | **129+** |
+
+---
+
+## 十二、相关文档（同目录）
+
+| 文档 | 说明 |
+|------|------|
+| `LingoFuse_LLM_Ecosystem_User_Guide.md` | 闭环架构与生态总览 |
+| `LingoFuse_LLM_Proxy_CLI_Guide.md` | `llm_proxy.exe` 命令行手册 |
+| `LingoFuse_LLM_Service_CLI_guide.md` | `llm_service.exe` 命令行手册 |
+| `LingoFuse_LLM_Pitfalls_For_AI.md` | 踩坑大全，症状-根因-正确做法 |
+| `LingoFuse_LLM_Service_Work_Summary.md` | 版本演进与架构决策（历史参考） |
+| `llama_cpp_python_guide.md` | `llama-cpp-python` 安装与使用 |
+
+---
+
+**文档版本**：V3.0（仅保留同目录链接，高对比配色）  
+**维护者**：LingoFuse-pasAgent 团队  
+**反馈**：问题提 Issue，急事加 Q（600585）
