@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LingoFuse LLM Service - Persistent multi-session streaming server (v3.3).
+LingoFuse LLM Service - Persistent multi-session streaming server (v3.9).
 
 Architecture
 ------------
@@ -39,25 +39,100 @@ Context Window
 model's maximum supported context. The actual value chosen is reported
 in the startup banner.
 
+Thinking Mode
+-------------
+The single source of truth for the default thinking behaviour is the
+module-level constant `DEFAULT_THINKING` (see below). Everything else
+is expressed relative to it:
+
+    Command line  --thinking / --no-thinking   (highest precedence)
+                  |
+    Environment   LLM_THINKING                  (only when the CLI
+                  |                              did not specify it)
+                  |
+    Constant      DEFAULT_THINKING              (lowest precedence)
+
+Concretely:
+
+  * If `--thinking` is passed, `thinking = True`.
+  * Else if `--no-thinking` is passed, `thinking = False`.
+  * Else if the `LLM_THINKING` environment variable is set, its value
+    decides the default (accepted truthy values: 1 / true / yes,
+    case-insensitive).
+  * Else the default falls back to `DEFAULT_THINKING`.
+
+A per-request `options.thinking` field, when present and non-None,
+overrides the global default for that single `generate` call.
+
+Changing `DEFAULT_THINKING` therefore changes the out-of-the-box
+behaviour of the service, while the CLI and the environment variable
+remain available as per-invocation overrides.
+
+Enforcement strategy
+--------------------
+The switch is enforced at the PROMPT level only, so that real-time
+streaming is preserved end to end:
+
+  (a) The model's chat template is loaded once at startup, either
+      from an explicit --chat-template file or from the GGUF metadata
+      key `tokenizer.chat_template`. Requests are then driven through
+      `create_completion` with a prompt rendered by this service, so
+      the service fully controls the final prompt string.
+
+  (b) After rendering, the prompt tail is normalized so that the
+      thinking block is in a deterministic state:
+
+        thinking=True  -> the prompt ends with an OPEN `<think>`
+                          marker on its own line. The model enters
+                          its reasoning phase, emits reasoning text,
+                          and terminates the block with `</think>`.
+                          The ThinkingParser splits the stream so
+                          reasoning is forwarded as `think` events
+                          and the final answer as `chunk` events.
+
+        thinking=False -> the prompt ends with a CLOSED
+                          `<think></think>` block. The model treats
+                          the reasoning phase as already finished
+                          and answers directly. No parser is
+                          installed; every token is forwarded as a
+                          `chunk` in real time.
+
+      The normalization is performed on a version of the prompt with
+      trailing whitespace stripped, and the whole tail is rebuilt
+      from scratch. This avoids two classes of bugs:
+        * duplicated markers when the template already produced the
+          desired marker but trailing whitespace hid it from the
+          endswith() check;
+        * residual newlines that would otherwise be embedded inside
+          the reconstructed thinking block.
+
+  (c) In `--debug` mode the last 200 characters of the rendered
+      prompt are printed to stderr, prefixed with `[DEBUG] rendered
+      prompt tail:`. This is the authoritative way to verify what
+      the model actually received.
+
+Net effect:
+  - thinking=False -> the model is prompted to answer directly. The
+    client sees a real-time stream of `chunk` events with no
+    reasoning preamble. Latency and streaming behaviour are
+    identical to LM Studio's "thinking off" mode.
+  - thinking=True  -> reasoning is streamed to the client as `think`
+    events, the final answer as `chunk` events.
+
 Chat Template
 -------------
-Exactly ONE chat template file may be used, and only when explicitly
-requested.
+At startup, exactly one chat template is selected:
 
-Behavior:
-  1. If --chat-template / LLM_CHAT_TEMPLATE is set to a non-empty path,
-     that exact file is loaded. A missing file is a hard error and the
-     service refuses to start.
-  2. If --chat-template is empty (the default), no template file is
-     loaded at all. The model's built-in chat template is used.
-
-The template is rendered with the following variables in scope:
-    messages, add_generation_prompt, bos_token, eos_token,
-    enable_thinking, truncate_history_thinking, reasoning_budget_message
-
-`enable_thinking` is toggled per-request via `options.thinking`.
-`reasoning_budget_message` is a plain string inserted by the template at
-the start of the thinking section.
+  1. If --chat-template / LLM_CHAT_TEMPLATE is set to a non-empty
+     path, that exact file is used. A missing file is a hard error.
+  2. Otherwise, the service reads `tokenizer.chat_template` from the
+     loaded GGUF model metadata and uses it as the default template.
+  3. If neither is available, the service falls back to
+     `create_chat_completion` mode, which delegates rendering to the
+     model's built-in template. In this fallback mode the prompt-level
+     thinking suppression is unavailable, and the answer is streamed
+     through unchanged. The service prints a warning at startup in
+     this case.
 
 Stability Notes (long-running / unattended operation)
 -----------------------------------------------------
@@ -77,6 +152,8 @@ Exposed Call APIs
   generate(content, prompt?, client_name?, session_id?, options?)
       -> {code, session_id, task_id, mode}
       mode = "new" | "continue" | "ephemeral"
+      options.thinking (bool, optional) overrides the global thinking
+      default for this single request.
 
   create_session(client_name, system_message?, options?)
       -> {code, session_id}
@@ -127,7 +204,8 @@ unsupported.
 Dependencies
 ------------
   Requires llama-cpp-python (preferred) or transformers + torch.
-  `jinja2` is needed only when a custom chat template file is supplied.
+  `jinja2` is required when a chat template is loaded (from an
+  explicit file or from the GGUF metadata).
   The LingoFuse dynamic library must be on the system PATH.
 """
 
@@ -159,15 +237,57 @@ from lingofuse._lf_native import (
 )
 
 
+# ======================================================================
+# GLOBAL THINKING SWITCH - SINGLE SOURCE OF TRUTH
+# ======================================================================
+#
+# `DEFAULT_THINKING` is the ONE knob that controls whether the service
+# asks the model to reason before answering. Everything else (CLI flag,
+# environment variable, per-request override) is layered on top of it.
+#
+# Precedence (highest to lowest):
+#
+#   1. Per-request: options.thinking in a `generate` call
+#   2. Command line: --thinking / --no-thinking
+#   3. Environment: LLM_THINKING=1/true/yes
+#   4. This constant: DEFAULT_THINKING
+#
+# Change this value to flip the out-of-the-box behaviour of the service.
+#
+#   True  -> by default, the model reasons before answering. Reasoning
+#            is streamed to the client as `think` events.
+#   False -> by default, the model answers directly. The rendered prompt
+#            is closed with <think></think>, so the model is told the
+#            reasoning phase is over. The client sees only `chunk`
+#            events, matching LM Studio's "thinking off" behaviour.
+DEFAULT_THINKING = False
+
+# Truthy / falsy tokens accepted from the LLM_THINKING environment
+# variable. Comparison is case-insensitive.
+_TRUTHY = ("1", "true", "yes", "on")
+_FALSY = ("0", "false", "no", "off")
+
+
+def _parse_thinking_env(raw: Optional[str]) -> Optional[bool]:
+    """
+    Convert the raw value of LLM_THINKING into a boolean.
+
+    Returns None when the environment variable is absent or its value
+    is not recognised. In that case the caller should fall back to
+    DEFAULT_THINKING.
+    """
+    if raw is None:
+        return None
+    v = raw.strip().lower()
+    if v in _TRUTHY:
+        return True
+    if v in _FALSY:
+        return False
+    return None
+
+
 # ----------------------------------------------------------------------
 # Frozen-executable detection and help-text invocation helpers
-#
-# The service can be launched in two ways:
-#   1. From source:    python llm_service.py [OPTIONS]
-#   2. As a frozen exe: llm_service.exe [OPTIONS]
-#
-# The `--help` output adapts its usage line and examples accordingly so
-# the user always sees the correct command for the current packaging.
 # ----------------------------------------------------------------------
 def is_frozen_exe() -> bool:
     """
@@ -175,8 +295,8 @@ def is_frozen_exe() -> bool:
 
     Detects PyInstaller (one-file or one-dir) and Nuitka by checking
     both `sys.frozen` and `sys._MEIPASS`. This mirrors the detection
-    used by llm_proxy.py, llm_test.py, mcp_api_tool.py and mcp_api_proxy.py
-    in the same project.
+    used by llm_proxy.py, llm_test.py, mcp_api_tool.py and
+    mcp_api_proxy.py in the same project.
     """
     return getattr(sys, 'frozen', False) or hasattr(sys, '_MEIPASS')
 
@@ -184,10 +304,8 @@ def is_frozen_exe() -> bool:
 def get_invocation_name() -> str:
     """
     Return the program name shown at the top of `--help` (the `prog=`
-    value).
-
-    - Frozen exe: the exe filename, e.g. "llm_service_cpu.exe".
-    - Script:     the script filename, e.g. "llm_service.py".
+    value). When running as a frozen exe, this is the exe filename;
+    when running from source, it is the script filename.
     """
     if is_frozen_exe():
         return os.path.basename(sys.executable)
@@ -197,13 +315,11 @@ def get_invocation_name() -> str:
 def get_example_invocation() -> str:
     """
     Return the full command prefix used in the `--help` examples.
-
-    - Frozen exe: "llm_service_cpu.exe"
-    - Script:     "python llm_service.py"
     """
     if is_frozen_exe():
         return os.path.basename(sys.executable)
-    return f"{os.path.basename(sys.executable)} {os.path.basename(os.path.abspath(__file__))}"
+    return (f"{os.path.basename(sys.executable)} "
+            f"{os.path.basename(os.path.abspath(__file__))}")
 
 
 # ----------------------------------------------------------------------
@@ -249,24 +365,21 @@ DEFAULT_ENDPOINT = "ipc:llm_service"
 DEFAULT_APP_NAME = "LLM_Service"
 DEFAULT_NOTIFY_API = "llm_stream"
 DEFAULT_TIMEOUT_MS = 5000
-DEFAULT_SESSION_TIMEOUT = 600          # seconds: idle timeout for sessions
-DEFAULT_LOG_LEVEL = 1                  # 0=quiet, 1=normal, 2=debug
-DEFAULT_QUEUE_MAX_SIZE = 256           # max queued generation tasks
-DEFAULT_MAX_SESSIONS = 1024            # max concurrent sessions
-MAX_CLIENT_NAME_LEN = 512              # sanity bound for client_name
-MAX_HISTORY_MESSAGES = 512             # cap on messages stored per session
+DEFAULT_SESSION_TIMEOUT = 600
+DEFAULT_LOG_LEVEL = 1
+DEFAULT_QUEUE_MAX_SIZE = 256
+DEFAULT_MAX_SESSIONS = 1024
+MAX_CLIENT_NAME_LEN = 512
+MAX_HISTORY_MESSAGES = 512
 
-# NOTE: This is a runtime data value, not a log message. It is prepended
-# by the chat template at the start of the thinking section to steer the
-# model's reasoning language.
-DEFAULT_REASONING_BUDGET_MESSAGE = "好的，我用简体中文来思考。禁止使用英文。\n"
+# Runtime data value (not a log message). Prepended by the chat template
+# at the start of the thinking section to steer the model's reasoning
+# language. Has no effect when thinking is disabled.
+DEFAULT_REASONING_BUDGET_MESSAGE = ""
 
 THINK_OPEN_MARKER = "<think>"
 THINK_CLOSE_MARKER = "</think>"
 
-# Reason string reported on the "closed" notification when the watchdog
-# reclaims a session because it has been idle past the timeout AND its
-# client application is no longer reachable.
 SESSION_CLOSE_REASON_TIMEOUT_OFFLINE = "timeout+offline"
 
 
@@ -274,37 +387,22 @@ SESSION_CLOSE_REASON_TIMEOUT_OFFLINE = "timeout+offline"
 # API capability matrix
 #
 # Keys are the full set of APIs that an LLM server in this ecosystem
-# may expose. Values are integers:
-#
-#     1  = supported by THIS server kind (llm_service)
-#     0  = NOT supported by this server kind (belongs to llm_proxy)
-#
-# The key set is IDENTICAL to the one published by llm_proxy.py. The
-# two server kinds differ only in the value of set_system_message:
-#   * llm_service (this file)  -> 1
-#   * llm_proxy                -> 0
-#
-# Clients should call the `get_api_capabilities` Call API (or read the
-# `api_capabilities` field of `health`) to discover this dictionary at
-# runtime, instead of hard-coding it.
+# may expose. Values are integers: 1 = supported by this server kind,
+# 0 = NOT supported (belongs to the sibling server kind). The key set
+# is IDENTICAL to the one published by llm_proxy.py; the two server
+# kinds differ only in the value of set_system_message.
 # ----------------------------------------------------------------------
 API_CAPABILITIES: Dict[str, int] = {
-    # ---- Call APIs (llm_service exposed set) ----
-    "generate":           1,   # fully implemented in-process
-    "create_session":     1,   # session registry is owned by this service
-    "close_session":      1,   # session registry is owned by this service
-    "cancel_session":     1,   # cancels the in-flight generation task
-    "list_sessions":      1,   # session registry is owned by this service
-    "set_system_message": 1,   # global default for NEW sessions
-    "health":             1,   # this service reports its own status
-
-    # ---- Notify API (streaming chunks back to the client) ----
-    "llm_stream":         1,   # same semantics as in llm_proxy
+    "generate":           1,
+    "create_session":     1,
+    "close_session":      1,
+    "cancel_session":     1,
+    "list_sessions":      1,
+    "set_system_message": 1,
+    "health":             1,
+    "llm_stream":         1,
 }
 
-# Identifies which server kind is answering. Included in the
-# `get_api_capabilities` and `health` responses so that clients can
-# branch on it if they need to.
 SERVER_KIND = "service"
 
 
@@ -327,6 +425,11 @@ class ServiceConfig:
         self.gpu_layers: int = DEFAULT_GPU_LAYERS
         self.system_message: str = DEFAULT_SYSTEM_MESSAGE
 
+        # ---- Thinking / reasoning ----
+        # Initialised from DEFAULT_THINKING; overwritten by
+        # _init_global_config() with the resolved value.
+        self.thinking: bool = bool(DEFAULT_THINKING)
+
         # ---- LingoFuse ----
         self.endpoint: str = DEFAULT_ENDPOINT
         self.app_name: str = DEFAULT_APP_NAME
@@ -339,13 +442,14 @@ class ServiceConfig:
         self.max_sessions: int = DEFAULT_MAX_SESSIONS
 
         # ---- Chat template ----
-        # Explicit path only. Empty / None means "use the model built-in
-        # template; do NOT search the filesystem".
+        # When a non-empty path is supplied, the file is loaded at
+        # startup. Otherwise, after the model is loaded, the service
+        # reads `tokenizer.chat_template` from the GGUF metadata.
         self.chat_template_path: Optional[str] = None
         self.chat_template_resolved_path: Optional[str] = None
         self.default_template: Optional[str] = None
 
-        # ---- Reasoning ----
+        # ---- Reasoning guidance text ----
         self.reasoning_budget_message: str = DEFAULT_REASONING_BUDGET_MESSAGE
 
         # ---- Logging ----
@@ -370,17 +474,39 @@ def parse_args() -> argparse.Namespace:
     """
     Parse command-line arguments.
 
+    Thinking resolution
+    -------------------
+    The default value for `--thinking` is computed as follows:
+
+      1. If LLM_THINKING is set to a recognised value, that value is
+         used.
+      2. Otherwise, DEFAULT_THINKING is used.
+
+    The command line itself (--thinking / --no-thinking) always wins
+    over this computed default, because argparse stores the flag's
+    value into `args.thinking` regardless of the default.
+
     The usage line and the examples section of `--help` adapt to the
     current packaging: when running from source they show
-    "python llm_service.py ...", when running as a frozen exe they show
-    "llm_service.exe ...".
+    "python llm_service.py ...", when running as a frozen exe they
+    show "llm_service.exe ...".
     """
     invocation = get_example_invocation()
 
-    # Build a compact capability listing for the epilog. This lets
-    # users read the `--help` output to see which APIs this server
-    # supports without having to start it and call
-    # get_api_capabilities.
+    # ---- Resolve the effective default for thinking ----
+    env_raw = os.environ.get("LLM_THINKING")
+    env_value = _parse_thinking_env(env_raw)
+    if env_value is not None:
+        thinking_default = env_value
+        thinking_default_source = f"LLM_THINKING={env_raw!r}"
+    else:
+        thinking_default = bool(DEFAULT_THINKING)
+        thinking_default_source = "DEFAULT_THINKING"
+        if env_raw is not None:
+            print(f"[WARN] LLM_THINKING={env_raw!r} is not a recognised "
+                  f"boolean; falling back to DEFAULT_THINKING "
+                  f"({DEFAULT_THINKING})", file=sys.stderr)
+
     supported = [k for k, v in API_CAPABILITIES.items() if v == 1]
     unsupported = [k for k, v in API_CAPABILITIES.items() if v == 0]
     cap_lines = (
@@ -404,27 +530,45 @@ def parse_args() -> argparse.Namespace:
         f"  {invocation} --endpoint ipc:llm_service --app-name LLM_Service\n"
         f"  {invocation} --chat-template ./chat_template.jinja --debug\n"
         f"  {invocation} --session-timeout 1800 --max-sessions 64\n"
+        f"  {invocation} --thinking --quiet\n"
         "\n"
-        "Chat template behaviour:\n"
-        "  --chat-template is empty by default, which means NO template\n"
-        "  file is loaded and the model's built-in chat template is used.\n"
-        "  Provide an explicit path to override. A missing file is a\n"
-        "  hard error.\n"
+        "Thinking mode:\n"
+        "  The single source of truth for the default thinking behaviour\n"
+        "  is the module-level constant DEFAULT_THINKING, currently set\n"
+        f"  to {DEFAULT_THINKING}.\n"
+        "\n"
+        "  The effective value is resolved in this order (highest wins):\n"
+        "    1. Per-request  : options.thinking in a generate call\n"
+        "    2. Command line : --thinking / --no-thinking\n"
+        "    3. Environment  : LLM_THINKING=1/true/yes or 0/false/no\n"
+        "    4. Constant     : DEFAULT_THINKING\n"
+        "\n"
+        "  When thinking is disabled, the rendered prompt is closed with\n"
+        "  <think></think> so the model answers directly. No server-side\n"
+        "  buffering is performed; the answer streams to the client in\n"
+        "  real time as `chunk` events.\n"
+        "\n"
+        "  When thinking is enabled, the rendered prompt is left open\n"
+        "  with <think>. Reasoning is streamed to the client as `think`\n"
+        "  events, the final answer as `chunk` events.\n"
+        "\n"
+        "Chat template selection:\n"
+        "  1. If --chat-template is set, that exact file is loaded.\n"
+        "  2. Otherwise, tokenizer.chat_template from the GGUF metadata\n"
+        "     is used as the default template.\n"
+        "  3. If neither is available, create_chat_completion mode is\n"
+        "     used and prompt-level thinking suppression is disabled.\n"
         "\n"
         "Relationship with llm_proxy.py:\n"
         "  Both server kinds expose the SAME Call API surface except for\n"
         "  set_system_message. Because the default endpoint\n"
         "  (ipc:llm_service) and app name (LLM_Service) are identical,\n"
         "  ONLY ONE of the two may run at any given time.\n"
-        "    llm_service (this file) - supports set_system_message\n"
-        "    llm_proxy               - does NOT support set_system_message\n"
         "\n"
         "Session watchdog:\n"
         "  A session is reclaimed only when BOTH conditions hold:\n"
         "    (a) it has been idle longer than --session-timeout, AND\n"
         "    (b) its client application is no longer reachable.\n"
-        "  Sessions whose client is still online are kept even after\n"
-        "  the idle timeout, so a returning client can resume.\n"
         "\n"
         "API capability advertisement:\n"
         f"{cap_lines}"
@@ -436,6 +580,7 @@ def parse_args() -> argparse.Namespace:
         "  LLM_THREADS                 - CPU threads\n"
         "  LLM_GPU_LAYERS              - GPU layers (-1=all, 0=CPU)\n"
         "  LLM_SYSTEM_MESSAGE          - default system message\n"
+        "  LLM_THINKING                - overrides DEFAULT_THINKING when set\n"
         "  LINGOFUSE_ENDPOINT          - LingoFuse endpoint\n"
         "  LINGOFUSE_APP_NAME          - service app name\n"
         "  LINGOFUSE_NOTIFY_API        - notify API name\n"
@@ -453,7 +598,7 @@ def parse_args() -> argparse.Namespace:
         prog=get_invocation_name(),
         description=(
             "LingoFuse LLM Service - persistent multi-session streaming "
-            "(v3.3)"
+            "(v3.9)"
         ),
         epilog=epilog,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -489,13 +634,41 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--gpu-layers", type=int,
         default=int(os.environ.get("LLM_GPU_LAYERS", DEFAULT_GPU_LAYERS)),
-        help=f"GPU layers to offload (-1=all, 0=CPU). Default: {DEFAULT_GPU_LAYERS}",
+        help=f"GPU layers to offload (-1=all, 0=CPU). "
+             f"Default: {DEFAULT_GPU_LAYERS}",
     )
     parser.add_argument(
         "--system-message",
         default=os.environ.get("LLM_SYSTEM_MESSAGE", DEFAULT_SYSTEM_MESSAGE),
         help="Default system message applied to NEW sessions. "
              "May also be changed at runtime via set_system_message.",
+    )
+
+    # ---- Thinking / reasoning ----
+    #
+    # The default value is computed from LLM_THINKING when it is set
+    # and recognised, otherwise from DEFAULT_THINKING. The command line
+    # overrides this default via store_true / store_false on the same
+    # dest.
+    parser.add_argument(
+        "--thinking", dest="thinking", action="store_true",
+        default=thinking_default,
+        help=(
+            "Enable thinking / reasoning mode globally for all sessions. "
+            "This overrides both LLM_THINKING and DEFAULT_THINKING for "
+            "this invocation. When thinking is disabled, the rendered "
+            "prompt is closed with <think></think> so the model answers "
+            "directly, matching LM Studio's \"thinking off\" behaviour. "
+            f"Currently the computed default is {thinking_default} "
+            f"(from {thinking_default_source})."
+        ),
+    )
+    parser.add_argument(
+        "--no-thinking", dest="thinking", action="store_false",
+        help=(
+            "Explicitly disable thinking / reasoning mode. Overrides "
+            "--thinking, LLM_THINKING, and DEFAULT_THINKING."
+        ),
     )
 
     # ---- LingoFuse ----
@@ -512,7 +685,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--notify-api",
         default=os.environ.get("LINGOFUSE_NOTIFY_API", DEFAULT_NOTIFY_API),
-        help=f"Notify API name for streaming chunks. Default: {DEFAULT_NOTIFY_API}",
+        help=f"Notify API name for streaming chunks. "
+             f"Default: {DEFAULT_NOTIFY_API}",
     )
     parser.add_argument(
         "--timeout", type=int,
@@ -523,22 +697,26 @@ def parse_args() -> argparse.Namespace:
     # ---- Service behaviour ----
     parser.add_argument(
         "--session-timeout", type=int,
-        default=int(os.environ.get("LLM_SESSION_TIMEOUT", DEFAULT_SESSION_TIMEOUT)),
+        default=int(os.environ.get("LLM_SESSION_TIMEOUT",
+                                   DEFAULT_SESSION_TIMEOUT)),
         help=f"Idle timeout (seconds) for sessions. Sessions that have not "
              f"been active for this long AND whose client application is "
-             f"offline are closed by the watchdog. Default: {DEFAULT_SESSION_TIMEOUT}",
+             f"offline are closed by the watchdog. "
+             f"Default: {DEFAULT_SESSION_TIMEOUT}",
     )
     parser.add_argument(
         "--queue-max-size", type=int,
-        default=int(os.environ.get("LLM_QUEUE_MAX_SIZE", DEFAULT_QUEUE_MAX_SIZE)),
-        help=f"Maximum queued generation tasks before rejecting new requests. "
-             f"Default: {DEFAULT_QUEUE_MAX_SIZE}",
+        default=int(os.environ.get("LLM_QUEUE_MAX_SIZE",
+                                   DEFAULT_QUEUE_MAX_SIZE)),
+        help=f"Maximum queued generation tasks before rejecting new "
+             f"requests. Default: {DEFAULT_QUEUE_MAX_SIZE}",
     )
     parser.add_argument(
         "--max-sessions", type=int,
         default=int(os.environ.get("LLM_MAX_SESSIONS", DEFAULT_MAX_SESSIONS)),
         help=f"Maximum number of concurrent sessions. New sessions are "
-             f"rejected when the limit is reached. Default: {DEFAULT_MAX_SESSIONS}",
+             f"rejected when the limit is reached. "
+             f"Default: {DEFAULT_MAX_SESSIONS}",
     )
 
     # ---- Chat template & reasoning ----
@@ -546,11 +724,11 @@ def parse_args() -> argparse.Namespace:
         "--chat-template",
         default=os.environ.get("LLM_CHAT_TEMPLATE", None),
         help=(
-            "Path to a Jinja2 chat template file. EMPTY BY DEFAULT, which "
-            "means NO template file is loaded and the model's built-in "
-            "chat template is used. When a non-empty path is provided, "
-            "that exact file is loaded; a missing file is a hard error. "
-            "Environment variable: LLM_CHAT_TEMPLATE."
+            "Path to a Jinja2 chat template file. When empty (the default), "
+            "the service uses tokenizer.chat_template from the GGUF model "
+            "metadata; if that is also unavailable, create_chat_completion "
+            "mode is used. A non-empty path that does not exist is a hard "
+            "error. Environment variable: LLM_CHAT_TEMPLATE."
         ),
     )
     parser.add_argument(
@@ -562,6 +740,7 @@ def parse_args() -> argparse.Namespace:
             "Text prepended by the chat template at the start of the "
             "thinking section. Used to steer the model's reasoning. "
             "Template accesses it via `reasoning_budget_message`. "
+            "Has no effect when thinking is disabled. "
             "Environment variable: LLM_REASONING_BUDGET_MESSAGE."
         ),
     )
@@ -575,12 +754,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--debug", action="store_true",
-        default=os.environ.get("LLM_DEBUG", "0").lower() in ("1", "true", "yes"),
-        help="Shortcut for --log-level 2.",
+        default=os.environ.get("LLM_DEBUG", "0").lower()
+        in ("1", "true", "yes"),
+        help="Shortcut for --log-level 2. Also enables "
+             "'[DEBUG] rendered prompt tail: ...' output on stderr.",
     )
     parser.add_argument(
         "--quiet", action="store_true",
-        default=os.environ.get("LLM_QUIET", "0").lower() in ("1", "true", "yes"),
+        default=os.environ.get("LLM_QUIET", "0").lower()
+        in ("1", "true", "yes"),
         help="Shortcut for --log-level 0.",
     )
 
@@ -594,6 +776,7 @@ def _init_global_config(args: argparse.Namespace) -> None:
     CONFIG.threads = args.threads
     CONFIG.gpu_layers = args.gpu_layers
     CONFIG.system_message = args.system_message
+    CONFIG.thinking = bool(args.thinking)
 
     CONFIG.endpoint = args.endpoint
     CONFIG.app_name = args.app_name
@@ -617,11 +800,9 @@ def _init_global_config(args: argparse.Namespace) -> None:
 
 # ----------------------------------------------------------------------
 # Chat template loading
-#
-# Only an EXPLICIT path is honored. When no path is given, the model's
-# built-in chat template is used and no filesystem search is performed.
 # ----------------------------------------------------------------------
 def load_chat_template(path: str) -> str:
+    """Read the given chat template file. Missing file is a hard error."""
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
@@ -631,14 +812,11 @@ def load_chat_template(path: str) -> str:
         sys.exit(1)
 
 
-def _resolve_and_load_template() -> None:
+def _resolve_explicit_template() -> None:
     """
-    Resolve and load the chat template, if one was explicitly requested.
-
-    - Non-empty --chat-template / LLM_CHAT_TEMPLATE: load that exact
-      file. A missing file is a hard error.
-    - Empty / None (the default): no template file is loaded. The
-      model's built-in chat template is used.
+    Load the explicit chat template, if one was requested on the
+    command line. The model metadata fallback happens later, after the
+    model has been loaded (see `_resolve_metadata_template`).
     """
     if CONFIG.chat_template_path:
         resolved = os.path.abspath(CONFIG.chat_template_path)
@@ -652,11 +830,56 @@ def _resolve_and_load_template() -> None:
               f"({len(CONFIG.default_template)} bytes)")
         return
 
-    # No explicit template: use the model's built-in chat template.
+    print("[LLM] No explicit chat template; will try GGUF metadata next")
+
+
+def _resolve_metadata_template(llm: Any) -> None:
+    """
+    If no explicit template was provided, read `tokenizer.chat_template`
+    from the loaded GGUF metadata and use it as the default template.
+
+    This is what allows the service to take full control of prompt
+    rendering (and therefore of the thinking-block suppression), even
+    when the user did not pass --chat-template.
+    """
+    if CONFIG.default_template is not None:
+        return
+
+    try:
+        metadata = getattr(llm, "metadata", None)
+    except Exception:
+        metadata = None
+
+    if not metadata:
+        print("[LLM] No GGUF metadata available; falling back to "
+              "create_chat_completion mode. Prompt-level thinking "
+              "suppression will not be available.")
+        return
+
+    tmpl = metadata.get("tokenizer.chat_template")
+    if not tmpl:
+        print("[LLM] tokenizer.chat_template not found in GGUF metadata; "
+              "falling back to create_chat_completion mode. Prompt-level "
+              "thinking suppression will not be available.")
+        return
+
+    # Some GGUF files store the template as a dict with named variants
+    # (e.g. {"default": "...", "tool_use": "..."}). Prefer "default".
+    if isinstance(tmpl, dict):
+        default_variant = tmpl.get("default")
+        if not default_variant:
+            default_variant = next(iter(tmpl.values())) if tmpl else None
+        tmpl = default_variant
+
+    if not isinstance(tmpl, str) or not tmpl:
+        print("[LLM] tokenizer.chat_template has an unsupported type; "
+              "falling back to create_chat_completion mode.")
+        return
+
+    CONFIG.default_template = tmpl
     CONFIG.chat_template_resolved_path = None
-    CONFIG.default_template = None
-    print("[LLM] No chat template file specified; "
-          "using the model's built-in chat template")
+    print(f"[LLM] Loaded chat template (from GGUF metadata): "
+          f"<{len(tmpl)} bytes>")
 
 
 # ----------------------------------------------------------------------
@@ -667,7 +890,8 @@ def estimate_tokens(llm, tokenizer, text: str) -> Optional[int]:
         return 0
     if LLM_BACKEND == "llama_cpp" and hasattr(llm, "tokenize"):
         try:
-            return len(llm.tokenize(text.encode("utf-8"), add_bos=False, special=True))
+            return len(llm.tokenize(text.encode("utf-8"),
+                                    add_bos=False, special=True))
         except Exception:
             return None
     if LLM_BACKEND == "transformers" and tokenizer is not None:
@@ -685,7 +909,8 @@ def load_llm(model_path: str, context_size: int, threads: int, gpu_layers: int):
     print("[LLM] Loading model... (this may take a while)")
     print(f"[LLM] Model path: {model_path}")
     ctx_display = "auto (model maximum)" if context_size == 0 else context_size
-    print(f"[LLM] Context size: {ctx_display}, threads: {threads}, GPU layers: {gpu_layers}")
+    print(f"[LLM] Context size: {ctx_display}, threads: {threads}, "
+          f"GPU layers: {gpu_layers}")
 
     if LLM_BACKEND == "llama_cpp":
         print("[LLM] Using backend: llama-cpp-python")
@@ -715,7 +940,8 @@ def load_llm(model_path: str, context_size: int, threads: int, gpu_layers: int):
     if LLM_BACKEND == "transformers":
         print("[LLM] Using backend: transformers")
         from transformers import AutoModelForCausalLM, AutoTokenizer
-        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_path,
+                                                  trust_remote_code=True)
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
             torch_dtype="auto",
@@ -736,12 +962,21 @@ def load_llm(model_path: str, context_size: int, threads: int, gpu_layers: int):
 class ThinkingParser:
     """
     Splits a token stream into `think` and `chunk` segments based on
-    `<think>` ... `</think>`. Handles markers that straddle chunk
-    boundaries by buffering a small tail.
+    `<think>` and `</think>` markers. Handles markers that straddle
+    chunk boundaries by buffering a small tail.
 
-    When `initial_in_thinking` is True, the generation stream is assumed
-    to start inside a thinking block (the chat template already opened
-    `<think>` in the prompt).
+    This parser is only used when thinking is enabled. When thinking is
+    disabled, the service relies entirely on the prompt-level
+    suppression (see `_render_prompt`): the rendered prompt is closed
+    with `<think></think>`, so the model answers directly and the
+    stream never contains any reasoning text. No server-side buffering
+    is needed in that case, and streaming stays real-time.
+
+    Parameters
+    ----------
+    initial_in_thinking : bool
+        When True, the stream is assumed to start inside a thinking
+        block (the prompt already opened `<think>`).
     """
 
     def __init__(self, initial_in_thinking: bool = False) -> None:
@@ -892,9 +1127,8 @@ class LLMService:
         self._sessions_lock = threading.Lock()
 
         # ---- Serial inference queue ----
-        self._request_queue: "queue.Queue[Optional[GenerationTask]]" = queue.Queue(
-            maxsize=CONFIG.queue_max_size
-        )
+        self._request_queue: "queue.Queue[Optional[GenerationTask]]" = \
+            queue.Queue(maxsize=CONFIG.queue_max_size)
         self._shutdown_event = threading.Event()
         self._worker_thread: Optional[threading.Thread] = None
         self._watchdog_thread: Optional[threading.Thread] = None
@@ -913,6 +1147,12 @@ class LLMService:
         print(f"[LLM] Model loaded in {time.monotonic() - load_start:.2f}s")
         print(f"[LLM] Effective context size: {actual_ctx} tokens")
 
+        # ---- Resolve chat template from metadata if needed ----
+        if self.backend == "llama_cpp":
+            _resolve_metadata_template(self.llm)
+        else:
+            print("[LLM] transformers backend: no template resolution")
+
         # ---- Start background threads ----
         self._start_worker()
         self._start_watchdog()
@@ -920,7 +1160,8 @@ class LLMService:
         # ---- Create server and register APIs ----
         self.server = Server(
             CONFIG.app_name,
-            "Local LLM Service with persistent multi-session streaming (v3.3)",
+            "Local LLM Service with persistent multi-session streaming "
+            "(v3.9)",
         )
         self._register_apis()
         atexit.register(self.cleanup)
@@ -945,15 +1186,15 @@ class LLMService:
         )
         self._watchdog_thread.start()
         print(f"[Service] Watchdog started (session idle timeout: "
-              f"{CONFIG.session_timeout}s; sessions are reclaimed only when "
-              f"BOTH idle past the timeout AND the client is offline)")
+              f"{CONFIG.session_timeout}s; sessions are reclaimed only "
+              f"when BOTH idle past the timeout AND the client is offline)")
 
     def _worker_loop(self) -> None:
         """
         Serial inference worker.
 
         This loop must NEVER exit on its own. Any exception raised by a
-        task is caught here (and again by _process_task's own guard);
+        task is caught here (and also by _process_task's own guard);
         the loop continues to service the next queued task.
         """
         while not self._shutdown_event.is_set():
@@ -1005,13 +1246,13 @@ class LLMService:
         ---------------------------
         Clients occasionally disconnect and reconnect (laptop sleeps,
         network glitch, client restart). If we reclaimed every session
-        the moment its idle timer expired, a client that just paused for
-        longer than `session_timeout` would lose its entire conversation
-        history. By also requiring the client to be offline, we give the
-        client a chance to come back.
+        the moment its idle timer expired, a client that just paused
+        for longer than `session_timeout` would lose its entire
+        conversation history. By also requiring the client to be
+        offline, we give the client a chance to come back.
 
-        Conversely, a client that is truly gone (process killed, machine
-        powered off) will eventually fall out of the LingoFuse
+        Conversely, a client that is truly gone (process killed,
+        machine powered off) will eventually fall out of the LingoFuse
         reachability cache, at which point the idle sessions it owned
         become eligible for reclamation. So the invariant we enforce is:
 
@@ -1019,13 +1260,13 @@ class LLMService:
 
         Reachability check
         ------------------
-        `check_app(client_name)` consults the same local cache that every
-        other LingoFuse reachability query uses. The cache is updated by
-        network broadcasts with a typical propagation delay of about 3
-        seconds. The watchdog runs on a 5-second tick, which is slower
-        than the cache update, so a client that has just disconnected
-        will have been evicted from the cache by the time the next tick
-        fires.
+        `check_app(client_name)` consults the same local cache that
+        every other LingoFuse reachability query uses. The cache is
+        updated by network broadcasts with a typical propagation delay
+        of about 3 seconds. The watchdog runs on a 5-second tick, which
+        is slower than the cache update, so a client that has just
+        disconnected will have been evicted from the cache by the time
+        the next tick fires.
 
         Running sessions are never eligible, regardless of idle time.
 
@@ -1143,8 +1384,8 @@ class LLMService:
     # ------------------------------------------------------------------
     # Safe wrappers around the handlers
     #
-    # LingoFuse's Server.expose already converts uncaught exceptions into
-    # an error JSON, but that error envelope differs from our own
+    # LingoFuse's Server.expose already converts uncaught exceptions
+    # into an error JSON, but that error envelope differs from our own
     # {code, error} shape. These wrappers ensure a consistent envelope
     # and, more importantly, guarantee that a handler bug can never
     # propagate past the LingoFuse callback boundary.
@@ -1201,14 +1442,31 @@ class LLMService:
     # Helpers
     # ------------------------------------------------------------------
     def _sanitize_options(self, raw: Dict[str, Any]) -> Dict[str, Any]:
-        """Accept only known keys; coerce types; drop everything else."""
+        """
+        Accept only known keys; coerce types; drop everything else.
+
+        The `thinking` field follows this resolution order:
+          1. If the request supplies a non-None `options.thinking`,
+             that value wins.
+          2. Otherwise the global `CONFIG.thinking` default is used.
+             `CONFIG.thinking` was computed at startup from the
+             --thinking / --no-thinking CLI flag, the LLM_THINKING
+             environment variable, and DEFAULT_THINKING, in that order
+             of precedence.
+        """
         out: Dict[str, Any] = {}
 
-        out["thinking"] = bool(raw.get("thinking", False))
+        # ---- thinking: per-request override falls back to global ----
+        if "thinking" in raw and raw["thinking"] is not None:
+            out["thinking"] = bool(raw["thinking"])
+        else:
+            out["thinking"] = bool(CONFIG.thinking)
+
         out["ephemeral"] = bool(raw.get("ephemeral", False))
 
         for key, cast, lo, hi in (
-            ("max_tokens",      int,   1, CONFIG.context_size_actual or (1 << 20)),
+            ("max_tokens",      int,   1,
+             CONFIG.context_size_actual or (1 << 20)),
             ("temperature",     float, 0.0, 2.0),
             ("top_p",           float, 0.0, 1.0),
             ("top_k",           int,   0, 1000),
@@ -1260,6 +1518,7 @@ class LLMService:
             existing = self._sessions.pop(session.session_id, None)
         if existing is None:
             return False
+
         # Signal cancel to any currently running task.
         try:
             with session.lock:
@@ -1284,7 +1543,8 @@ class LLMService:
     # ------------------------------------------------------------------
     def _handle_generate(self, data: Any) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            return {"code": -1, "error": "generate expects a JSON object payload"}
+            return {"code": -1,
+                    "error": "generate expects a JSON object payload"}
 
         content = data.get("content", "") or ""
         prompt = data.get("prompt", "") or ""
@@ -1315,16 +1575,19 @@ class LLMService:
             # Allow client_name to be omitted when continuing a session.
             if client_name and client_name != session.client_name:
                 return {"code": -1,
-                        "error": "client_name does not match the session owner"}
+                        "error": "client_name does not match the session "
+                                 "owner"}
             mode = "continue"
         else:
             # New session. client_name is required in this branch.
             if not client_name or not isinstance(client_name, str):
                 return {"code": -1,
-                        "error": "Missing client_name (required for new sessions)"}
+                        "error": "Missing client_name (required for new "
+                                 "sessions)"}
             if len(client_name) > MAX_CLIENT_NAME_LEN:
                 return {"code": -1,
-                        "error": f"client_name exceeds {MAX_CLIENT_NAME_LEN} chars"}
+                        "error": f"client_name exceeds "
+                                 f"{MAX_CLIENT_NAME_LEN} chars"}
             if self._count_sessions() >= CONFIG.max_sessions:
                 return {"code": -1,
                         "error": f"Session limit reached "
@@ -1336,8 +1599,8 @@ class LLMService:
         with self._system_message_lock:
             system_snapshot = session.system_message
         try:
-            error = self._check_token_budget(session, content, prompt, options,
-                                             system_snapshot)
+            error = self._check_token_budget(session, content, prompt,
+                                             options, system_snapshot)
         except Exception as e:
             print(f"[Service] token budget check failed: {e}")
             error = f"Internal error during token budget check: {e}"
@@ -1384,20 +1647,24 @@ class LLMService:
 
     def _handle_create_session(self, data: Any) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            return {"code": -1, "error": "create_session expects a JSON object"}
+            return {"code": -1,
+                    "error": "create_session expects a JSON object"}
         client_name = data.get("client_name")
         if not client_name or not isinstance(client_name, str):
-            return {"code": -1, "error": "Missing client_name (string required)"}
+            return {"code": -1,
+                    "error": "Missing client_name (string required)"}
         if len(client_name) > MAX_CLIENT_NAME_LEN:
             return {"code": -1,
-                    "error": f"client_name exceeds {MAX_CLIENT_NAME_LEN} chars"}
+                    "error": f"client_name exceeds "
+                             f"{MAX_CLIENT_NAME_LEN} chars"}
         system_message = data.get("system_message")
         if system_message is not None and not isinstance(system_message, str):
             return {"code": -1, "error": "system_message must be a string"}
 
         if self._count_sessions() >= CONFIG.max_sessions:
             return {"code": -1,
-                    "error": f"Session limit reached (max {CONFIG.max_sessions})"}
+                    "error": f"Session limit reached "
+                             f"(max {CONFIG.max_sessions})"}
 
         session = self._create_session(client_name, system_message)
         print(f"[Service] Session created: {session.session_id} "
@@ -1410,7 +1677,8 @@ class LLMService:
 
     def _handle_close_session(self, data: Any) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            return {"code": -1, "error": "close_session expects a JSON object"}
+            return {"code": -1,
+                    "error": "close_session expects a JSON object"}
         session_id = data.get("session_id")
         if not session_id or not isinstance(session_id, str):
             return {"code": -1, "error": "Missing session_id"}
@@ -1428,7 +1696,8 @@ class LLMService:
     def _handle_cancel_session(self, data: Any) -> Dict[str, Any]:
         """Cancel the currently running generation, keep the session alive."""
         if not isinstance(data, dict):
-            return {"code": -1, "error": "cancel_session expects a JSON object"}
+            return {"code": -1,
+                    "error": "cancel_session expects a JSON object"}
         session_id = data.get("session_id")
         if not session_id or not isinstance(session_id, str):
             return {"code": -1, "error": "Missing session_id"}
@@ -1466,10 +1735,12 @@ class LLMService:
         message at creation time.
         """
         if not isinstance(data, dict):
-            return {"code": -1, "error": "set_system_message expects a JSON object"}
+            return {"code": -1,
+                    "error": "set_system_message expects a JSON object"}
         new_msg = data.get("content")
         if new_msg is None or not isinstance(new_msg, str):
-            return {"code": -1, "error": "Missing or invalid 'content' field"}
+            return {"code": -1,
+                    "error": "Missing or invalid 'content' field"}
         with self._system_message_lock:
             self._system_message = new_msg
         preview = new_msg[:50] + ("..." if len(new_msg) > 50 else "")
@@ -1511,6 +1782,7 @@ class LLMService:
             "model": CONFIG.model_path,
             "context_size_requested": CONFIG.context_size,
             "context_size_actual": CONFIG.context_size_actual,
+            "thinking_default": CONFIG.thinking,
             "sessions_total": len(sessions),
             "sessions_idle": idle,
             "sessions_running": running,
@@ -1542,17 +1814,13 @@ class LLMService:
         max_tokens = options.get("max_tokens", CONFIG.max_tokens)
         new_input = content + "\n\n" + prompt
 
-        # Cheap pre-check: total character count of history + system + new.
-        total_chars = (
-            len(system_message)
-            + sum(len(str(m.get("content", ""))) for m in session.messages)
-            + len(new_input)
-        )
         # A conservative 1-token-per-2-chars estimate is used as a first
-        # approximation; tokenize the largest single piece for calibration.
+        # approximation; tokenize the largest single piece for
+        # calibration.
         input_tokens = estimate_tokens(self.llm, self.tokenizer, new_input)
         if input_tokens is None:
             input_tokens = len(new_input) // 2 + 1
+
         # Add a rough per-message overhead and the accumulated history.
         history_overhead = 8 * len(session.messages) + 32
         history_tokens = sum(
@@ -1561,9 +1829,9 @@ class LLMService:
              (len(str(m.get("content", ""))) // 2 + 1))
             for m in session.messages
         )
-        sys_tokens = estimate_tokens(self.llm, self.tokenizer, system_message) or (
-            len(system_message) // 2 + 1
-        )
+        sys_tokens = estimate_tokens(
+            self.llm, self.tokenizer, system_message
+        ) or (len(system_message) // 2 + 1)
 
         total_needed = (
             input_tokens + sys_tokens + history_tokens + history_overhead
@@ -1572,9 +1840,11 @@ class LLMService:
         if total_needed > CONFIG.context_size_actual:
             return (
                 f"Request too large: input={input_tokens} tokens, "
-                f"system={sys_tokens} tokens, history={history_tokens} tokens, "
+                f"system={sys_tokens} tokens, "
+                f"history={history_tokens} tokens, "
                 f"max_output={max_tokens} tokens, "
-                f"total={total_needed} > context={CONFIG.context_size_actual}"
+                f"total={total_needed} > "
+                f"context={CONFIG.context_size_actual}"
             )
         return None
 
@@ -1597,11 +1867,13 @@ class LLMService:
         try:
             with self._sessions_lock:
                 if session.session_id not in self._sessions:
-                    print(f"[Task {task.task_id}] Session {session.session_id} "
-                          f"no longer exists; dropping task")
+                    print(f"[Task {task.task_id}] Session "
+                          f"{session.session_id} no longer exists; "
+                          f"dropping task")
                     return
         except Exception as e:
-            print(f"[Task {task.task_id}] session existence check failed: {e}")
+            print(f"[Task {task.task_id}] session existence check "
+                  f"failed: {e}")
 
         # ---- Mark session as running and bind this task's cancel event ----
         try:
@@ -1609,7 +1881,8 @@ class LLMService:
                 session.status = "running"
                 session.current_cancel_event = task.cancel_event
         except Exception as e:
-            print(f"[Task {task.task_id}] failed to mark session running: {e}")
+            print(f"[Task {task.task_id}] failed to mark session running: "
+                  f"{e}")
             return
 
         # ---- Immediate cancel check ----
@@ -1617,7 +1890,7 @@ class LLMService:
             self._safe_finalize(session, task, cancelled=True)
             return
 
-        thinking = bool(task.options.get("thinking", False))
+        thinking = bool(task.options.get("thinking", CONFIG.thinking))
         max_tokens = task.options.get("max_tokens", CONFIG.max_tokens)
         temperature = task.options.get("temperature", 0.7)
         top_p = task.options.get("top_p", 0.95)
@@ -1625,7 +1898,8 @@ class LLMService:
         repeat_penalty = task.options.get("repeat_penalty", 1.1)
 
         print(f"[Task {task.task_id}] Generation started "
-              f"(session={session.session_id}, client={session.client_name}, "
+              f"(session={session.session_id}, "
+              f"client={session.client_name}, "
               f"thinking={thinking}, max_tokens={max_tokens}, "
               f"history={len(session.messages)})")
 
@@ -1634,12 +1908,14 @@ class LLMService:
             with session.lock:
                 history = [dict(m) for m in session.messages]
             new_user_content = task.content + "\n\n" + task.prompt
-            messages = [{"role": "system", "content": session.system_message}]
+            messages = [{"role": "system",
+                         "content": session.system_message}]
             messages.extend(history)
             messages.append({"role": "user", "content": new_user_content})
         except Exception as e:
             print(f"[Task {task.task_id}] failed to build messages: {e}")
-            self._safe_finalize(session, task, error=f"Internal error: {e}")
+            self._safe_finalize(session, task,
+                                error=f"Internal error: {e}")
             return
 
         # ---- Generate ----
@@ -1671,7 +1947,8 @@ class LLMService:
             msg = str(e)
             lowered = msg.lower()
             if "out of memory" in lowered or "cuda out of memory" in lowered:
-                msg = "CUDA out of memory - reduce max_tokens or use a smaller model"
+                msg = ("CUDA out of memory - reduce max_tokens or use a "
+                       "smaller model")
             elif "context" in lowered and "length" in lowered:
                 msg = (f"Context length exceeded - maximum context size "
                        f"{CONFIG.context_size_actual} tokens")
@@ -1686,7 +1963,8 @@ class LLMService:
             cancelled=task.cancel_event.is_set(),
         )
 
-    def _safe_finalize(self, session: Session, task: GenerationTask, **kwargs) -> None:
+    def _safe_finalize(self, session: Session, task: GenerationTask,
+                       **kwargs) -> None:
         """
         Call `_finalize_task`, guaranteeing that the session state is
         reset even if `_finalize_task` itself raises.
@@ -1703,7 +1981,8 @@ class LLMService:
                     session.current_cancel_event = None
                     session.last_active_at = time.monotonic()
             except Exception as ee:
-                print(f"[Task {task.task_id}] fallback state reset failed: {ee}")
+                print(f"[Task {task.task_id}] fallback state reset failed: "
+                      f"{ee}")
 
     def _finalize_task(
         self,
@@ -1721,16 +2000,18 @@ class LLMService:
           - send the appropriate terminal notification
           - if the task is ephemeral, close the session
 
-        Ordering matters: the session state reset is performed FIRST and
-        is protected by its own try/except. Even if a later notification
-        step raises, the session will not stay stuck in "running".
+        Ordering matters: the session state reset is performed FIRST
+        and is protected by its own try/except. Even if a later
+        notification step raises, the session will not stay stuck in
+        "running".
         """
         # ---- Step 1: update session state (MUST succeed) ----
         try:
             with session.lock:
                 if error is None and not cancelled:
                     user_input = (task.content + "\n\n" + task.prompt)
-                    session.messages.append({"role": "user", "content": user_input})
+                    session.messages.append(
+                        {"role": "user", "content": user_input})
                     assistant_msg: Dict[str, Any] = {
                         "role": "assistant",
                         "content": answer,
@@ -1747,7 +2028,8 @@ class LLMService:
                 session.current_cancel_event = None
         except Exception as e:
             print(f"[Task {task.task_id}] state update failed: {e}")
-            # Force a minimal reset so the session is not stuck in "running".
+            # Force a minimal reset so the session is not stuck in
+            # "running".
             try:
                 with session.lock:
                     session.status = "idle"
@@ -1765,7 +2047,8 @@ class LLMService:
             else:
                 self._emit_finish(session, "stop")
         except Exception as e:
-            print(f"[Task {task.task_id}] terminal notification failed: {e}")
+            print(f"[Task {task.task_id}] terminal notification failed: "
+                  f"{e}")
 
         # ---- Step 3: log ----
         try:
@@ -1783,6 +2066,140 @@ class LLMService:
             except Exception as e:
                 print(f"[Task {task.task_id}] ephemeral close failed: {e}")
 
+    # ------------------------------------------------------------------
+    # Prompt rendering
+    # ------------------------------------------------------------------
+    def _render_prompt(
+        self,
+        messages: List[Dict[str, Any]],
+        thinking: bool,
+    ) -> Optional[str]:
+        """
+        Render the chat template to a single prompt string, and force
+        the thinking block into a deterministic state so that the model
+        behaves unambiguously.
+
+        The template is rendered with the standard variables that
+        LingoFuse LLM templates expect. After rendering, this method
+        rebuilds the tail of the prompt so the `<think>` / `</think>`
+        markers are in the state required by the `thinking` flag.
+
+        Rebuild strategy
+        ----------------
+        All work is done on `stripped = prompt_str.rstrip()` so that
+        the endswith() checks are not confused by trailing whitespace
+        the template may have left behind, and so that no residual
+        newline ends up embedded inside the reconstructed thinking
+        block. When a modification is needed, the new tail is built
+        from `stripped` (not from the original `prompt_str`), which
+        guarantees that:
+
+          * the prompt never ends up with two consecutive `<think>`
+            markers, even if the template already produced `<think>`
+            followed by trailing whitespace;
+          * a `<think></think>` pair reconstructed when thinking is
+            disabled always appears on a single line, without any
+            newline between the two markers.
+
+        - thinking=True:
+            The prompt is guaranteed to end with an OPEN `<think>`
+            marker on its own line. The model then enters its
+            reasoning phase, emits reasoning text, and terminates the
+            block with `</think>`. The ThinkingParser installed by
+            `_run_llama_cpp` splits the stream so reasoning is
+            forwarded as `think` events and the final answer as
+            `chunk` events.
+
+        - thinking=False:
+            The prompt is guaranteed to end with a CLOSED
+            `<think></think>` block. The model treats the reasoning
+            phase as already finished and answers directly. No parser
+            is installed; every token is forwarded as a `chunk` in
+            real time.
+
+        Returns the rendered prompt, or None if no template is
+        available.
+        """
+        template = CONFIG.default_template
+        if not template:
+            return None
+
+        try:
+            from jinja2 import Template
+        except ImportError:
+            raise RuntimeError(
+                "A chat template is in use but jinja2 is not installed. "
+                "Install jinja2 or remove the chat template."
+            )
+
+        tpl = Template(template)
+        prompt_str = tpl.render(
+            messages=messages,
+            add_generation_prompt=True,
+            bos_token="<s>",
+            eos_token="</s>",
+            enable_thinking=bool(thinking),
+            truncate_history_thinking=True,
+            reasoning_budget_message=CONFIG.reasoning_budget_message,
+        )
+
+        # All tail manipulation is done on a whitespace-trimmed view of
+        # the prompt, so that a trailing newline left by the template
+        # cannot hide the marker we are looking for, and so that the
+        # rebuilt tail is clean.
+        stripped = prompt_str.rstrip()
+
+        if thinking:
+            # ---- Ensure the prompt ends with an OPEN thinking block ----
+            if stripped.endswith(THINK_OPEN_MARKER):
+                # The template already opened the block on its own.
+                # Keep the original prompt unchanged (so any trailing
+                # whitespace the template produced is preserved).
+                pass
+            elif stripped.endswith(THINK_CLOSE_MARKER):
+                # The template closed the block. Rebuild the tail so
+                # that it ends with a fresh open marker on its own
+                # line, with no duplicated <think> and no stale
+                # </think> left behind.
+                head = stripped[:-len(THINK_CLOSE_MARKER)].rstrip()
+                prompt_str = head + "\n" + THINK_OPEN_MARKER + "\n"
+            else:
+                # The template did not manage the block at all. Append
+                # an open marker on its own line.
+                prompt_str = stripped + "\n" + THINK_OPEN_MARKER + "\n"
+        else:
+            # ---- Ensure the prompt ends with a CLOSED thinking block ----
+            if stripped.endswith(THINK_CLOSE_MARKER):
+                # Already closed; keep the original prompt unchanged.
+                pass
+            elif stripped.endswith(THINK_OPEN_MARKER):
+                # The template opened the block but did not close it.
+                # Close it on the same line as the opening marker so
+                # that no newline ends up inside the empty block.
+                prompt_str = stripped + THINK_CLOSE_MARKER + "\n"
+            else:
+                # The template did not manage the block at all. Append
+                # an empty, closed block on its own line.
+                prompt_str = (stripped + "\n"
+                              + THINK_OPEN_MARKER
+                              + THINK_CLOSE_MARKER + "\n")
+
+        # ---- Diagnostic dump (debug mode only) ----
+        #
+        # The tail of the rendered prompt is the authoritative source
+        # of truth for what the model actually receives. Printing it
+        # here lets operators diagnose thinking-mode problems without
+        # having to read the code.
+        if CONFIG.log_level >= 2:
+            tail = prompt_str[-200:] if len(prompt_str) > 200 else prompt_str
+            print(f"[DEBUG] rendered prompt tail: {tail!r}",
+                  file=sys.stderr)
+
+        return prompt_str
+
+    # ------------------------------------------------------------------
+    # Inference
+    # ------------------------------------------------------------------
     def _run_llama_cpp(
         self,
         session: Session,
@@ -1796,36 +2213,57 @@ class LLMService:
         thinking: bool,
     ) -> Tuple[str, str]:
         """
-        Drive a single streaming generation. Returns (think_text, answer_text).
-        Both buffers accumulate the same text that is sent to the client
-        and are used to build the assistant message stored in history.
+        Drive a single streaming generation. Returns
+        (think_text, answer_text).
+
+        Thinking behaviour
+        ------------------
+        The `thinking` flag controls both the prompt sent to the model
+        and the parsing of the token stream:
+
+        - thinking=True:
+            * The prompt is rendered with enable_thinking=True and is
+              normalized to end with an open `<think>` marker.
+            * A ThinkingParser splits the stream into `think` and
+              `chunk` segments, which are streamed to the client as
+              they arrive.
+
+        - thinking=False:
+            * The prompt is rendered with enable_thinking=False and is
+              normalized to end with a closed `<think></think>` block.
+              The model treats the reasoning phase as already finished
+              and answers directly. This matches the effect of LM
+              Studio's "thinking off" switch.
+            * No parser is installed. The stream is forwarded as-is,
+              preserving the real-time streaming property. If a
+              particular model ignores the prompt-level hint and emits
+              reasoning anyway, that reasoning will be visible to the
+              client as ordinary text; the service does not silently
+              buffer it.
 
         The underlying generator is closed explicitly in a `finally`
         block so that a mid-stream exception does not leak resources.
         """
-        template = CONFIG.default_template
         think_parts: List[str] = []
         answer_parts: List[str] = []
         stream = None
 
+        # ---- Install a parser only when thinking is enabled ----
+        #
+        # When thinking is disabled, we rely entirely on prompt-level
+        # suppression: the rendered prompt is closed with
+        # <think></think>, so the model answers directly and never
+        # emits reasoning text. There is nothing for the parser to
+        # filter, and installing a buffering parser would destroy the
+        # real-time streaming property of the answer.
+        parser = ThinkingParser(initial_in_thinking=thinking) if thinking \
+            else None
+
         try:
-            if template:
-                try:
-                    from jinja2 import Template
-                except ImportError:
-                    raise RuntimeError(
-                        "Chat template supplied but jinja2 is not installed"
-                    )
-                tpl = Template(template)
-                prompt_str = tpl.render(
-                    messages=messages,
-                    add_generation_prompt=True,
-                    bos_token="<s>",
-                    eos_token="</s>",
-                    enable_thinking=thinking,
-                    truncate_history_thinking=True,
-                    reasoning_budget_message=CONFIG.reasoning_budget_message,
-                )
+            prompt_str = self._render_prompt(messages, thinking)
+
+            if prompt_str is not None:
+                # ---- Prompt-controlled path ----
                 stream = self.llm.create_completion(
                     prompt=prompt_str,
                     max_tokens=max_tokens,
@@ -1836,8 +2274,12 @@ class LLMService:
                     stream=True,
                 )
                 chunk_key = "text"
-                parser = ThinkingParser(initial_in_thinking=thinking) if thinking else None
             else:
+                # ---- Fallback: delegate rendering to the model ----
+                #
+                # When no template is available, prompt-level thinking
+                # suppression is impossible. The stream is forwarded
+                # as-is; the client sees whatever the model emits.
                 stream = self.llm.create_chat_completion(
                     messages=messages,
                     max_tokens=max_tokens,
@@ -1848,7 +2290,6 @@ class LLMService:
                     stream=True,
                 )
                 chunk_key = "delta"
-                parser = ThinkingParser(initial_in_thinking=False) if thinking else None
 
             for chunk in stream:
                 if task.cancel_event.is_set():
@@ -1874,10 +2315,13 @@ class LLMService:
                             continue
                         if mtype == "think":
                             think_parts.append(mtext)
+                            self._emit_message(session, "think", mtext)
                         else:
                             answer_parts.append(mtext)
-                        self._emit_message(session, mtype, mtext)
+                            self._emit_message(session, "chunk", mtext)
                 else:
+                    # Thinking is disabled. Forward the text directly as
+                    # a chunk; no buffering, no filtering.
                     answer_parts.append(text)
                     self._emit_message(session, "chunk", text)
 
@@ -1887,9 +2331,10 @@ class LLMService:
                         continue
                     if mtype == "think":
                         think_parts.append(mtext)
+                        self._emit_message(session, "think", mtext)
                     else:
                         answer_parts.append(mtext)
-                    self._emit_message(session, mtype, mtext)
+                        self._emit_message(session, "chunk", mtext)
 
             return "".join(think_parts), "".join(answer_parts)
         finally:
@@ -1932,19 +2377,23 @@ class LLMService:
             "reason": reason,
         })
 
-    def _emit_message_raw(self, session: Session, payload: Dict[str, Any]) -> None:
+    def _emit_message_raw(self, session: Session,
+                          payload: Dict[str, Any]) -> None:
         self._send_payload(session, payload)
 
-    def _send_payload(self, session: Session, payload: Dict[str, Any]) -> None:
+    def _send_payload(self, session: Session,
+                      payload: Dict[str, Any]) -> None:
         hnd = None
         try:
-            if CONFIG.enable_warning_logging and not check_app(session.client_name):
+            if CONFIG.enable_warning_logging \
+                    and not check_app(session.client_name):
                 print(f"[Session {session.session_id}] WARNING: "
                       f"client app '{session.client_name}' not reachable "
                       f"(cache may lag; attempting send anyway)")
             hnd = DataHandle(CONFIG.notify_api)
             hnd.write_json(payload)
-            LF_Sequenced_Notify(session.client_name.encode("utf-8"), hnd.raw)
+            LF_Sequenced_Notify(session.client_name.encode("utf-8"),
+                                hnd.raw)
         except Exception as e:
             print(f"[Session {session.session_id}] send failed "
                   f"({payload.get('type')}): {e}")
@@ -1988,13 +2437,16 @@ class LLMService:
             pass
 
         # Join worker.
-        if self._worker_thread is not None and self._worker_thread.is_alive():
+        if self._worker_thread is not None \
+                and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=15.0)
             if self._worker_thread.is_alive():
-                print("[Service] WARNING: worker thread did not exit in time")
+                print("[Service] WARNING: worker thread did not exit in "
+                      "time")
 
         # Watchdog uses wait(timeout=5.0), so it will exit promptly.
-        if self._watchdog_thread is not None and self._watchdog_thread.is_alive():
+        if self._watchdog_thread is not None \
+                and self._watchdog_thread.is_alive():
             self._watchdog_thread.join(timeout=6.0)
 
         # Stop the LingoFuse server.
@@ -2023,21 +2475,23 @@ def print_service_status() -> None:
     if CONFIG.chat_template_resolved_path:
         template_display = CONFIG.chat_template_resolved_path
         template_display += " (explicit)"
+    elif CONFIG.default_template is not None:
+        template_display = "(from GGUF metadata)"
     else:
-        template_display = "(model built-in)"
+        template_display = "(none - create_chat_completion fallback)"
 
     rbm = CONFIG.reasoning_budget_message or ""
     rbm_preview = (rbm[:40] + "...") if len(rbm) > 40 else rbm
     rbm_preview = rbm_preview.replace("\n", "\\n")
+    if not rbm_preview:
+        rbm_preview = "(empty)"
 
-    # Build a compact, human-readable view of the capability matrix:
-    # group supported APIs and unsupported APIs on two lines.
     supported = [k for k, v in API_CAPABILITIES.items() if v == 1]
     unsupported = [k for k, v in API_CAPABILITIES.items() if v == 0]
 
     lines = [
         "=" * 70,
-        " LINGOFUSE LLM SERVICE STATUS (v3.3)",
+        " LINGOFUSE LLM SERVICE STATUS (v3.9)",
         "=" * 70,
         f"  Server kind             : {SERVER_KIND}",
         f"  Backend                 : {LLM_BACKEND}",
@@ -2047,6 +2501,8 @@ def print_service_status() -> None:
         f"  Default max tokens      : {CONFIG.max_tokens}",
         f"  CPU threads             : {CONFIG.threads}",
         f"  GPU layers offloaded    : {CONFIG.gpu_layers}",
+        f"  Thinking (global)       : {CONFIG.thinking}",
+        f"  Thinking (DEFAULT_)     : {DEFAULT_THINKING}",
         f"  LingoFuse endpoint      : {CONFIG.endpoint}",
         f"  Service app name        : {CONFIG.app_name}",
         f"  Notify API name         : {CONFIG.notify_api}",
@@ -2057,7 +2513,8 @@ def print_service_status() -> None:
         f"  Reasoning budget msg    : \"{rbm_preview}\"",
         f"  Log level               : {CONFIG.log_level}",
         "-" * 70,
-        f"  Watchdog policy         : reclaim only when idle past the timeout",
+        f"  Watchdog policy         : reclaim only when idle past the "
+        f"timeout",
         f"                            AND the client app is offline",
         f"  Supported APIs          : {', '.join(supported)}",
         f"  Unsupported APIs        : {', '.join(unsupported) or '(none)'}",
@@ -2107,7 +2564,9 @@ def main() -> None:
               file=sys.stderr)
         sys.exit(1)
 
-    _resolve_and_load_template()
+    # Resolve the explicit template now (if any); the metadata-based
+    # template is resolved later, once the model has been loaded.
+    _resolve_explicit_template()
 
     service: Optional[LLMService] = None
     try:
